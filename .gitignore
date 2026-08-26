@@ -1,0 +1,9 @@
+# Rust
+/target/
+
+# Editors and OS
+.DS_Store
+*.swp
+
+# Agent scratch
+/.scratch/
