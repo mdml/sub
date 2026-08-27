@@ -6,8 +6,8 @@ These instructions apply to every coding agent working in this repository (`clau
 
 `sub` has a human-owned mental model that lives outside this repository. It states product intent, the decisions already made, the hypotheses under test, the active spikes, and the proofs that gate releases. This repository describes the implemented system; it does not duplicate the mental model.
 
-- Load it through the user-level pointer named `sub-mental-model` (a skill, or a line in your user-level instructions). Read it in full before any product or public-interface decision.
-- If the pointer is absent from your environment, stop and ask for the mental model before making any product or public-interface decision. Do not reconstruct it from this repository.
+- It reaches you as a skill named `sub-mental-model`, loaded from the owner's user scope in every `claude`, `codex`, and `cursor-agent` session. Invoke it before any product or public-interface decision — SDK types, MCP tool names, CLI commands, result/event/params shapes, the `sub.toml` schema, naming, scope — and read the model in full.
+- If the `sub-mental-model` skill is absent from your session, stop and ask for the mental model before making any such decision. Do not reconstruct it from this repository or proceed on inference.
 - Never edit the mental model. Propose changes in your handoff instead.
 
 ## Assumption boundary
