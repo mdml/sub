@@ -37,4 +37,4 @@ Reload the relevant part of the mental model before reporting. Explain what chan
 - Documentation describes the current state of the repository on `staging` and `main`. Update it in the same PR as the code it describes.
 - Spikes land in `docs/spikes/<name>.md`, with captured evidence and any disposable prototype under `spikes/<name>/`. Run a spike only when the task names it. A resolved spike keeps its report and evidence; its prototype is deleted at resolution and stays recoverable from git history.
 - Resolved spikes: ACP boundary (`docs/spikes/acp-boundary.md`, 2026-08-27). Its recommendation is adopted in the mental model; read the mental model, not the report, for what was decided.
-- One verification entry point will exist for all three harnesses; until it does, say in your handoff what you ran.
+- The verification entry point is `scripts/verify.sh` (`just verify`); run it before every commit and say in your handoff that you did. The full gate is `scripts/verify.sh --full`. See `docs/verification.md`.
