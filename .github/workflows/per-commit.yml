@@ -1,0 +1,30 @@
+# Per-commit gate: pushes to PR branches and pull requests into staging.
+name: per-commit
+
+on:
+  pull_request:
+    branches: [staging]
+  push:
+    branches-ignore: [main, staging]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: per-commit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy, llvm-tools
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.7
+      - run: scripts/verify.sh

@@ -1,0 +1,17 @@
+# Dependency-freshness proposals as pull requests into staging.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: staging
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: staging
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ci)"

@@ -1,0 +1,35 @@
+# Full gate: pull requests into main and pushes to main.
+name: full
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-full:
+    runs-on: ubuntu-latest
+    env:
+      # Required secret; scripts/codescene.sh fails with a clear message when absent.
+      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy, llvm-tools
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.7,cargo-deny@0.20.2
+      - run: scripts/verify.sh --full
