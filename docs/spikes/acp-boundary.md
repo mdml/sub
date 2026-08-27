@@ -1,6 +1,6 @@
 # Spike: Agent Client Protocol (ACP) boundary
 
-Executed 2026-08-26 (evening, America/New_York) by an unattended `claude` agent on branch `spike/acp-boundary`. Status: **complete**. Wall-clock from first command (20:21) to PR (about 20:40): roughly 20 minutes; no cost figure for the manager session was visible to the agent. Child costs: the claude child reported USD 0.72 for its run; codex and cursor children reported tokens only or nothing (see Gaps).
+Executed 2026-08-26 (evening, America/New_York) by an unattended `claude` agent on branch `spike/acp-boundary`. Status: **complete**. Wall-clock: the agent's commands were timestamped 20:21–20:37 on 2026-08-26 (about 16 minutes of active work, parallel runs included); the machine clock then read 09:22 on 2026-08-27 when the PR was opened, so the elapsed time cannot be stated more precisely than "under an hour of agent activity"; no cost figure for the manager session was visible to the agent. Child costs: the claude child reported USD 0.72 for its run; codex and cursor children reported tokens only or nothing (see Gaps).
 
 ## Summary and recommendation
 
