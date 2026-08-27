@@ -1,0 +1,29 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist' (cargo-dist). Rationale and the steps still required
+# before a first release: docs/decisions/2026-08-27-release-tooling.md and
+# docs/release.md. No release has been cut; the workflow runs only on v* tags.
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "homebrew"]
+# Target platforms to build apps for (Rust target-triple syntax). Windows is out of scope.
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Where to host releases
+hosting = "github"
+# Whether to install an updater program
+install-updater = false
+# Checksums for every artifact
+checksum = "sha256"
+# Sign and attest artifacts with GitHub artifact attestations (Sigstore, keyless)
+github-attestations = true
+# Homebrew tap that receives the generated formula. The tap repository must
+# exist and a HOMEBREW_TAP_TOKEN secret must be set before the first release.
+tap = "mdml/homebrew-tap"
+publish-jobs = ["homebrew"]
