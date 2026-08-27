@@ -1,13 +1,13 @@
-# ACP boundary spike — disposable prototype
+# ACP boundary spike — evidence
 
-**This directory is disposable.** It exists only as evidence for `docs/spikes/acp-boundary.md`. It is not wired into any workspace, build, CI, or verification entry point, and nothing in `sub` may depend on it. Delete it once the spike is resolved.
+**This directory is evidence only** for `docs/spikes/acp-boundary.md`. It is not wired into any workspace, build, CI, or verification entry point, and nothing in `sub` may depend on it.
 
 ## Layout
 
-- `proto/` — a standalone Cargo crate (`acp-delegate`, its own `[workspace]`) that acts as an ACP client: spawns an agent process, opens one session, sends one prompt, auto-approves every `session/request_permission`, writes every `session/update` to `events.jsonl`, and writes `result.json` (handle, stop reason, usage, final text).
 - `evidence/` — captured output from the runs described in the spike report, plus the raw JSON-RPC probe scripts used for the recover mapping.
+- `proto/` — the disposable prototype (`acp-delegate`, a standalone Cargo crate acting as a one-shot ACP client: spawn an agent process, open one session, send one prompt, auto-approve every `session/request_permission`, write every `session/update` to `events.jsonl` and a `result.json`). Deleted when the spike was resolved on 2026-08-27; recover it with `git log -- spikes/acp-boundary/proto` to rerun.
 
-## Rerun
+## Rerun (requires the deleted `proto/`)
 
 Prerequisites: `cargo`, `node`/`npm`, and the harnesses' existing logins. Nothing here writes credentials or changes harness configuration.
 
