@@ -15,4 +15,4 @@ fmt:
 # Dependency-freshness and vulnerability checks, as the GitHub nightly runs them.
 nightly-deps:
     cargo deny --locked check advisories
-    cargo update --workspace --locked --dry-run
+    cargo update --dry-run
