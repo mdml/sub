@@ -1,0 +1,90 @@
+{
+  "agent_info": {
+    "name": "@agentclientprotocol/codex-acp",
+    "title": "Codex",
+    "version": "1.6.2"
+  },
+  "agent_capabilities": {
+    "loadSession": true,
+    "promptCapabilities": {
+      "image": true,
+      "audio": false,
+      "embeddedContext": true
+    },
+    "mcpCapabilities": {
+      "http": true,
+      "sse": false
+    },
+    "sessionCapabilities": {
+      "list": {},
+      "delete": {},
+      "additionalDirectories": {},
+      "resume": {},
+      "close": {}
+    },
+    "auth": {
+      "logout": {}
+    }
+  },
+  "handle": {
+    "session_id": "01a0409f-ada4-76c2-8c7a-68ef4d888a3b",
+    "cwd": "/tmp/claude-1000/-home-mdml-projects-sub-spike-acp/dc9cf467-e8ec-4734-b91a-b1b242885d31/scratchpad/run1/work"
+  },
+  "launched_ms": 979,
+  "finished_ms": 25599,
+  "stop_reason": "end_turn",
+  "prompt_response_raw": {
+    "stopReason": "end_turn",
+    "usage": {
+      "totalTokens": 16749,
+      "inputTokens": 1410,
+      "outputTokens": 235,
+      "thoughtTokens": 47,
+      "cachedReadTokens": 15104
+    },
+    "_meta": {
+      "quota": {
+        "token_count": {
+          "totalTokens": 16749,
+          "inputTokens": 1410,
+          "cachedInputTokens": 15104,
+          "outputTokens": 235,
+          "reasoningOutputTokens": 47
+        },
+        "model_usage": [
+          {
+            "model": "gpt-5.6-sol",
+            "token_count": {
+              "totalTokens": 16749,
+              "inputTokens": 1410,
+              "cachedInputTokens": 15104,
+              "outputTokens": 235,
+              "reasoningOutputTokens": 47
+            }
+          }
+        ]
+      }
+    }
+  },
+  "updates": 259,
+  "tool_calls": 3,
+  "usage_updates": [
+    {
+      "used": 15845,
+      "size": 258400
+    },
+    {
+      "used": 16133,
+      "size": 258400
+    },
+    {
+      "used": 16290,
+      "size": 258400
+    },
+    {
+      "used": 16749,
+      "size": 258400
+    }
+  ],
+  "final_text": "I’ll scaffold the minimal binary crate, add a unit-tested greeting function, then run `cargo test` and preserve its complete output.The crate is in place with a single test checking the exact greeting. I’m running the requested test command now.Created the Rust binary crate with one unit test. `cargo test` passed.\n\n```text\n   Compiling hello-world v0.1.0 (/tmp/claude-1000/-home-mdml-projects-sub-spike-acp/dc9cf467-e8ec-4734-b91a-b1b242885d31/scratchpad/run1/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s\n     Running unittests src/main.rs (target/debug/deps/hello_world-49a68be6e0999eec)\n\nrunning 1 test\ntest tests::greeting_says_hello_world ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n```"
+}

@@ -1,0 +1,33 @@
+{
+  "agent_info": null,
+  "agent_capabilities": {
+    "loadSession": true,
+    "promptCapabilities": {
+      "image": true,
+      "audio": false,
+      "embeddedContext": false
+    },
+    "mcpCapabilities": {
+      "http": true,
+      "sse": true
+    },
+    "sessionCapabilities": {
+      "list": {}
+    },
+    "auth": {}
+  },
+  "handle": {
+    "session_id": "5b84c95d-a0c6-4e6c-a1e5-d1671530392b",
+    "cwd": "/tmp/claude-1000/-home-mdml-projects-sub-spike-acp/dc9cf467-e8ec-4734-b91a-b1b242885d31/scratchpad/run3/work"
+  },
+  "launched_ms": 3366,
+  "finished_ms": 25519,
+  "stop_reason": "end_turn",
+  "prompt_response_raw": {
+    "stopReason": "end_turn"
+  },
+  "updates": 123,
+  "tool_calls": 6,
+  "usage_updates": [],
+  "final_text": "I'll set up a minimal Rust binary crate with a unit test, then run `cargo test` and share the full output.\nCreated a `hello-world` Rust binary crate with:\n\n- **`Cargo.toml`** — package manifest (edition 2024)\n- **`src/main.rs`** — prints `\"Hello, world!\"` and includes one unit test (`it_says_hello`)\n\nFull `cargo test` output:\n\n```\n   Compiling hello-world v0.1.0 (/tmp/claude-1000/-home-mdml-projects-sub-spike-acp/dc9cf467-e8ec-4734-b91a-b1b242885d31/scratchpad/run3/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s\n     Running unittests src/main.rs (target/debug/deps/hello_world-49a68be6e0999eec)\n\nrunning 1 test\ntest tests::it_says_hello ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n```\n\nAll tests passed."
+}
