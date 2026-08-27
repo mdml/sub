@@ -7,3 +7,4 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - Repository shell: README, Apache-2.0 license, agent instructions, this changelog.
+- Spike report `docs/spikes/acp-boundary.md` with a disposable prototype under `spikes/acp-boundary/` (ACP v1 capability map for `claude`, `codex`, `cursor-agent`; recommendation: wrap ACP with a small delegation layer).
