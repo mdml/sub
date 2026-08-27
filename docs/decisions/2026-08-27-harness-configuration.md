@@ -4,7 +4,7 @@ Date: 2026-08-27. Status: adopted.
 
 ## Decision
 
-`AGENTS.md` is the single source of agent instructions; `CLAUDE.md` imports it and `codex` and `cursor-agent` read it natively. Project-level permission configuration is checked in for each harness: `.claude/settings.json` (permission allow-list for the verification commands), `.codex/config.toml` (project-scoped settings; no overrides yet), and `.cursor/cli.json` (permission allow-list). No project-level MCP configuration is checked in: the only MCP server the repository's process uses, Dogtag for the mental-model audit, is user-level and owner-specific. Skills are user-level too (the `sub-mental-model` skill, per the mental model). See `docs/harnesses.md`.
+`AGENTS.md` is the single source of agent instructions; `CLAUDE.md` imports it and `codex` and `cursor-agent` read it natively. Project-level permission configuration is checked in for each harness: `.claude/settings.json` (permission allow-list for the verification commands), `.codex/config.toml` (project-scoped settings; no overrides yet), and `.cursor/cli.json` (permission allow-list). No project-level MCP configuration is checked in: the repository's process needs no MCP server. Skills are user-level (the `sub-mental-model` skill, per the mental model). See `docs/harnesses.md`.
 
 ## Rationale
 
