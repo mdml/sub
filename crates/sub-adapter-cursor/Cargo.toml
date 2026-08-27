@@ -1,0 +1,16 @@
+[package]
+name = "sub-adapter-cursor"
+description = "sub adapter for the cursor-agent harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+sub-sdk.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

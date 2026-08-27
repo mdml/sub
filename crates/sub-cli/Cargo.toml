@@ -1,0 +1,20 @@
+[package]
+name = "sub-cli"
+description = "Command-line surface for sub, for humans"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "sub"
+path = "src/main.rs"
+
+[dependencies]
+sub-sdk.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

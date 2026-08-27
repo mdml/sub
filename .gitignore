@@ -7,3 +7,6 @@
 
 # Agent scratch
 /.scratch/
+
+# CodeScene CLI installed by scripts/codescene.sh
+/target/codescene/
