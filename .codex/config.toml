@@ -1,0 +1,3 @@
+# Project-scoped codex configuration. Instructions live in AGENTS.md; the
+# mental model reaches codex as the user-level sub-mental-model skill.
+# No overrides yet. Keep this file free of anything machine-specific or secret.
