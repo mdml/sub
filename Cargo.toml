@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/sub-sdk",
+    "crates/sub-mcp",
+    "crates/sub-cli",
+    "crates/sub-harness-fake",
+    "crates/sub-adapter-claude",
+    "crates/sub-adapter-codex",
+    "crates/sub-adapter-cursor",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+repository = "https://github.com/mdml/sub"
+homepage = "https://github.com/mdml/sub"
+
+[workspace.dependencies]
+# Exact pins. Rationale: docs/decisions/2026-08-27-async-runtime.md and
+# docs/decisions/2026-08-27-acp-sdk.md.
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
+agent-client-protocol = "=2.0.0"
+sub-sdk = { path = "crates/sub-sdk", version = "=0.0.0" }
+sub-harness-fake = { path = "crates/sub-harness-fake", version = "=0.0.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

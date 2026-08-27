@@ -1,0 +1,16 @@
+[package]
+name = "sub-sdk"
+description = "The sub kernel: the delegated-work model and the SDK every surface consumes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+tokio.workspace = true
+agent-client-protocol.workspace = true
+
+[lints]
+workspace = true
