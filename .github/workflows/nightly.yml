@@ -1,0 +1,37 @@
+# GitHub nightly: vulnerability and dependency-freshness checks.
+# The on-machine nightlies (harness compatibility, mental-model audit) are
+# documented under docs/nightlies/ and are not run here.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # 06:17 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny --locked check advisories
+
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+      - name: Report crates with newer versions (informational, fails only on error)
+        run: cargo update --workspace --locked --dry-run
+      - name: Report pinned GitHub Actions
+        run: grep -rn "uses:" .github/workflows | sort -u
