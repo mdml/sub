@@ -1,0 +1,115 @@
+{
+  "agent_info": {
+    "name": "@agentclientprotocol/claude-agent-acp",
+    "title": "Claude Agent",
+    "version": "0.70.0"
+  },
+  "agent_capabilities": {
+    "loadSession": true,
+    "promptCapabilities": {
+      "image": true,
+      "audio": false,
+      "embeddedContext": true
+    },
+    "mcpCapabilities": {
+      "http": true,
+      "sse": true
+    },
+    "sessionCapabilities": {
+      "list": {},
+      "delete": {},
+      "additionalDirectories": {},
+      "resume": {},
+      "close": {}
+    },
+    "auth": {
+      "logout": {}
+    },
+    "_meta": {
+      "claudeCode": {
+        "promptQueueing": true
+      }
+    }
+  },
+  "handle": {
+    "session_id": "68c0a625-6ce3-479a-9c61-0bf4799f611e",
+    "cwd": "/tmp/claude-1000/-home-mdml-projects-sub-spike-acp/dc9cf467-e8ec-4734-b91a-b1b242885d31/scratchpad/run2/work"
+  },
+  "launched_ms": 1281,
+  "finished_ms": 17398,
+  "stop_reason": "end_turn",
+  "prompt_response_raw": {
+    "stopReason": "end_turn",
+    "usage": {
+      "totalTokens": 116962,
+      "inputTokens": 8,
+      "outputTokens": 758,
+      "cachedReadTokens": 86211,
+      "cachedWriteTokens": 29985
+    }
+  },
+  "updates": 62,
+  "tool_calls": 3,
+  "usage_updates": [
+    {
+      "used": 27406,
+      "size": 1000000
+    },
+    {
+      "used": 27527,
+      "size": 1000000
+    },
+    {
+      "used": 27527,
+      "size": 1000000,
+      "_meta": {
+        "_claude/rateLimit": {
+          "status": "allowed",
+          "resetsAt": 1787797800,
+          "rateLimitType": "five_hour",
+          "overageStatus": "rejected",
+          "overageDisabledReason": "org_level_disabled",
+          "isUsingOverage": false
+        }
+      }
+    },
+    {
+      "used": 29245,
+      "size": 1000000
+    },
+    {
+      "used": 29484,
+      "size": 1000000
+    },
+    {
+      "used": 29607,
+      "size": 1000000
+    },
+    {
+      "used": 29671,
+      "size": 1000000
+    },
+    {
+      "used": 29989,
+      "size": 1000000
+    },
+    {
+      "used": 30280,
+      "size": 1000000
+    },
+    {
+      "used": 30280,
+      "size": 1000000,
+      "cost": {
+        "amount": 0.723891,
+        "currency": "USD"
+      },
+      "_meta": {
+        "_claude/origin": {
+          "kind": "human"
+        }
+      }
+    }
+  ],
+  "final_text": "I'll create the crate, add a unit test, and run `cargo test`.Done. Created `hello_world` binary crate (`cargo init`) with a `greeting()` function, `main` printing it, and one unit test. Full `cargo test` output:\n\n```\n   Compiling hello_world v0.1.0 (/tmp/claude-1000/-home-mdml-projects-sub-spike-acp/dc9cf467-e8ec-4734-b91a-b1b242885d31/scratchpad/run2/work)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s\n     Running unittests src/main.rs (target/debug/deps/hello_world-928df0894fdbd5ca)\n\nrunning 1 test\ntest tests::greeting_is_hello_world ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n```"
+}
