@@ -1,9 +1,13 @@
 //! The `sub` kernel.
 //!
-//! This crate will hold the delegated-work model (tasks, execution attempts,
+//! This crate holds the delegated-work model (tasks, execution attempts,
 //! events, results, artifacts) and the SDK that the MCP and CLI surfaces
-//! consume. Public shapes are proposed in pull requests to `staging` and are
-//! not yet defined here.
+//! consume. Public shapes are proposed in pull requests to `staging`.
+//!
+//! The shared ACP client layer lives in [`acp`]; adapters depend on it rather
+//! than on ACP schema types directly.
+
+pub mod acp;
 
 /// The crate version, as compiled from `Cargo.toml`.
 #[must_use]
