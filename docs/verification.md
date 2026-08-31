@@ -19,6 +19,8 @@ Runs on every push to a pull-request branch and on pull requests into `staging`.
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked` | Broken intra-doc link or rustdoc warning. |
 | Tests and coverage | `cargo llvm-cov --workspace --all-features --locked --fail-under-lines 90 --summary-only` | Any test fails, or line coverage over the workspace is 90 % or below. |
 
+The per-commit gate includes the behavioral contract suite (`crates/sub-sdk/tests/behavioral_contract.rs`) against the `sub-harness-fake` binary. Opt-in real-harness runs use `SUB_CONTRACT_REAL_HARNESS`; see [`nightlies/harness-compatibility.md`](nightlies/harness-compatibility.md).
+
 The coverage threshold is the same as the full gate's, so a change that passes here already meets `main`'s coverage requirement. Set `SUB_COVERAGE_MIN` to experiment locally; CI does not.
 
 ## The full gate: `scripts/verify.sh --full`

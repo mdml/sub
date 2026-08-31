@@ -14,6 +14,16 @@ Purpose: detect that a real harness or bridge has drifted from what the adapters
 
 Run `scripts/nightly/harness-compatibility.sh` once a day from the owner's scheduler with the repository checked out at `staging`. The script requires the harness binaries on `PATH` and does not modify any harness's global configuration.
 
+## Real-harness mode
+
+The contract suite lives in `crates/sub-sdk/tests/behavioral_contract.rs`. CI runs the fake-harness cases on every per-commit gate. Locally, set `SUB_CONTRACT_REAL_HARNESS` to `claude`, `codex`, or `cursor-agent` (optional override: `SUB_CONTRACT_HARNESS_CMD`) before running:
+
+```sh
+SUB_CONTRACT_REAL_HARNESS=codex cargo test -p sub-sdk --test behavioral_contract
+```
+
+The nightly script sets that variable per installed harness and runs `real_harness_mode_entrypoint`.
+
 ## Status
 
-Definition only. The contract suite and adapters do not exist yet; the script exits with a message saying so.
+The contract suite and fake harness exist. Adapter version constants and bridge comparison remain stubs until item 3 (adapters); the nightly logs that gap and still runs real-harness contract tests when harnesses are installed.
