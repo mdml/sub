@@ -1,0 +1,203 @@
+//! Behavioral contract suite for ACP harnesses.
+//!
+//! By default these tests drive the programmable fake harness. Set
+//! `SUB_CONTRACT_REAL_HARNESS` to `claude`, `codex`, or `cursor-agent` to run
+//! the same assertions against a locally installed bridge, optionally overriding
+//! the launch command with `SUB_CONTRACT_HARNESS_CMD`.
+
+mod common;
+
+use std::time::Duration;
+
+use common::harness::{ContractHarness, FakeScenario, real_harness_enabled};
+use sub_sdk::acp::{
+    AcpClient, AcpClientConfig, AcpError, HarnessLaunch, PromptOptions, StopReason,
+    StreamUpdateKind,
+};
+use tempfile::TempDir;
+
+const PROMPT: &str = "contract suite probe";
+
+fn client(launch: HarnessLaunch) -> AcpClient {
+    AcpClient::new(launch, AcpClientConfig::default())
+}
+
+async fn prompt(
+    harness: &ContractHarness,
+    options: PromptOptions,
+) -> Result<(sub_sdk::acp::SessionHandle, sub_sdk::acp::PromptResult), AcpError> {
+    let cwd = TempDir::new().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    client(harness.launch())
+        .prompt_turn(cwd.path(), PROMPT, options)
+        .await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn launch_and_stream_consumption_minimal() {
+    let harness = ContractHarness::select(FakeScenario::ReplayMinimal);
+    let (_handle, result) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(10)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert!(
+        result
+            .updates
+            .iter()
+            .any(|update| update.kind == StreamUpdateKind::AgentMessageChunk),
+        "expected message chunks in the stream"
+    );
+    assert!(result.final_text.contains("Hello"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn launch_and_stream_consumption_recorded_codex_fixture() {
+    let harness = ContractHarness::select(FakeScenario::ReplayCodex);
+    let (_handle, result) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(30)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert!(
+        result.updates.len() > 10,
+        "recorded codex fixture should replay many updates, got {}",
+        result.updates.len()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancellation_honored() {
+    let harness = ContractHarness::select(FakeScenario::CancelHonored);
+    let (_handle, result) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(10)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::Cancelled);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancellation_ignored() {
+    let harness = ContractHarness::select(FakeScenario::IgnoreCancel);
+    let (_handle, result) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(10)),
+            cancel_after: Some(Duration::from_millis(50)),
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn death_mid_stream() {
+    let harness = ContractHarness::select(FakeScenario::DieMidStream);
+    let Err(error) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(10)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    else {
+        panic!("agent death should fail the turn");
+    };
+
+    assert!(
+        matches!(
+            error,
+            AcpError::Protocol(_)
+                | AcpError::StreamEnded
+                | AcpError::ProcessExited
+                | AcpError::Io(_)
+        ),
+        "unexpected error: {error:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn hang_times_out() {
+    let harness = ContractHarness::select(FakeScenario::Hang);
+    let Err(error) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_millis(500)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    else {
+        panic!("hang without cancel should time out");
+    };
+
+    assert!(matches!(error, AcpError::TimedOut(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_output() {
+    let harness = ContractHarness::select(FakeScenario::Malformed);
+    let Err(error) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(10)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    else {
+        panic!("malformed output should fail the turn");
+    };
+
+    assert!(
+        matches!(
+            error,
+            AcpError::Protocol(_) | AcpError::StreamEnded | AcpError::Io(_)
+        ),
+        "unexpected error: {error:?}"
+    );
+}
+
+/// Run the full contract suite against the harness selected by environment.
+///
+/// Used by `scripts/nightly/harness-compatibility.sh` in real-harness mode.
+#[tokio::test(flavor = "current_thread")]
+async fn real_harness_mode_entrypoint() {
+    if !real_harness_enabled() {
+        eprintln!("SUB_CONTRACT_REAL_HARNESS unset; real-harness entrypoint skipped");
+        return;
+    }
+
+    let harness = ContractHarness::select(FakeScenario::ReplayMinimal);
+    let (_handle, result) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_mins(2)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("real harness prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+}
