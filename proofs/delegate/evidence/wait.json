@@ -1,0 +1,25 @@
+{
+  "state": "complete",
+  "result": {
+    "status": "succeeded",
+    "summary": "I’ll create the exact one-line file and verify its bytes.Created [proof.txt]($WORK/proof.txt).",
+    "changed_files": [
+      "$WORK/proof.txt"
+    ],
+    "artifacts": [
+      {
+        "kind": "event_log",
+        "location": "$STATE_DIR/tasks/tsk_edc3c3c44d78645c32675a04/attempts/1/events.jsonl"
+      },
+      {
+        "kind": "supervisor_log",
+        "location": "$STATE_DIR/tasks/tsk_edc3c3c44d78645c32675a04/attempts/1/supervisor.log"
+      },
+      {
+        "kind": "native_session",
+        "location": "$CODEX_HOME/sessions/2026/08/31/rollout-2026-08-31T15-44-32-01a0595a-1b5c-78a3-a5c7-c7779416056d.jsonl"
+      }
+    ],
+    "harness_session_id": "01a0595a-1b5c-78a3-a5c7-c7779416056d"
+  }
+}

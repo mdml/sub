@@ -3,8 +3,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 /// Command and environment for spawning an ACP agent over stdio.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessLaunch {
     command: PathBuf,
     args: Vec<String>,

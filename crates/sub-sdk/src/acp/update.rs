@@ -1,5 +1,9 @@
 //! Session update events from an agent stream.
 
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
 trait ContentBlockExt {
     fn as_text(&self) -> Option<&str>;
 }
@@ -15,16 +19,19 @@ impl ContentBlockExt for agent_client_protocol::schema::v1::ContentBlock {
 }
 
 /// One normalized update from a running prompt turn.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamUpdate {
     /// Which kind of session update this represents.
     pub kind: StreamUpdateKind,
     /// Text content when the update carries a message or thought chunk.
     pub text: Option<String>,
+    /// File locations attached to an edit, delete, or move tool call.
+    pub changed_files: Vec<PathBuf>,
 }
 
 /// The kind of activity reported in a session update.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum StreamUpdateKind {
     /// An assistant message chunk.
@@ -56,6 +63,7 @@ impl StreamUpdate {
         Self {
             kind: StreamUpdateKind::PermissionDenied,
             text: request.tool_call.fields.title.clone(),
+            changed_files: Vec::new(),
         }
     }
 
@@ -68,40 +76,72 @@ impl StreamUpdate {
             SessionUpdate::AgentMessageChunk(chunk) => Self {
                 kind: StreamUpdateKind::AgentMessageChunk,
                 text: chunk.content.as_text().map(str::to_owned),
+                changed_files: Vec::new(),
             },
             SessionUpdate::AgentThoughtChunk(chunk) => Self {
                 kind: StreamUpdateKind::AgentThoughtChunk,
                 text: chunk.content.as_text().map(str::to_owned),
+                changed_files: Vec::new(),
             },
-            SessionUpdate::ToolCall(_) => Self {
+            SessionUpdate::ToolCall(tool) => Self {
                 kind: StreamUpdateKind::ToolCall,
-                text: None,
+                text: Some(tool.title.clone()),
+                changed_files: changed_locations(tool.kind, &tool.locations),
             },
-            SessionUpdate::ToolCallUpdate(_) => Self {
+            SessionUpdate::ToolCallUpdate(tool) => Self {
                 kind: StreamUpdateKind::ToolCallUpdate,
-                text: None,
+                text: tool.fields.title.clone(),
+                changed_files: tool
+                    .fields
+                    .locations
+                    .as_ref()
+                    .map_or_else(Vec::new, |locations| {
+                        tool.fields
+                            .kind
+                            .map_or_else(Vec::new, |kind| changed_locations(kind, locations))
+                    }),
             },
             SessionUpdate::UsageUpdate(_) => Self {
                 kind: StreamUpdateKind::UsageUpdate,
                 text: None,
+                changed_files: Vec::new(),
             },
             SessionUpdate::SessionInfoUpdate(_) => Self {
                 kind: StreamUpdateKind::SessionInfoUpdate,
                 text: None,
+                changed_files: Vec::new(),
             },
             SessionUpdate::AvailableCommandsUpdate(_) => Self {
                 kind: StreamUpdateKind::AvailableCommandsUpdate,
                 text: None,
+                changed_files: Vec::new(),
             },
             SessionUpdate::Plan(_) => Self {
                 kind: StreamUpdateKind::Plan,
                 text: None,
+                changed_files: Vec::new(),
             },
             _ => Self {
                 kind: StreamUpdateKind::Other,
                 text: None,
+                changed_files: Vec::new(),
             },
         }
+    }
+}
+
+fn changed_locations(
+    kind: agent_client_protocol::schema::v1::ToolKind,
+    locations: &[agent_client_protocol::schema::v1::ToolCallLocation],
+) -> Vec<PathBuf> {
+    use agent_client_protocol::schema::v1::ToolKind;
+    if matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move) {
+        locations
+            .iter()
+            .map(|location| location.path.clone())
+            .collect()
+    } else {
+        Vec::new()
     }
 }
 
@@ -196,5 +236,20 @@ mod tests {
         let mapped = StreamUpdate::from_session_update(&update);
         assert_eq!(mapped.kind, StreamUpdateKind::AgentMessageChunk);
         assert!(mapped.text.is_none());
+    }
+
+    #[test]
+    fn maps_changed_files_from_tool_update() {
+        use agent_client_protocol::schema::v1::{
+            ToolCallId, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        };
+        let update = SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            ToolCallId::new("edit"),
+            ToolCallUpdateFields::new()
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/tmp/changed")]),
+        ));
+        let mapped = StreamUpdate::from_session_update(&update);
+        assert_eq!(mapped.changed_files, [PathBuf::from("/tmp/changed")]);
     }
 }

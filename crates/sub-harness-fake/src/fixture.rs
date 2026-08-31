@@ -140,10 +140,10 @@ mod tests {
 
     #[test]
     fn missing_fixture_dir_errors() {
-        let Err(error) = LoadedFixture::load("/nonexistent/fixture/path") else {
-            panic!("expected io error");
-        };
-        assert!(matches!(error, FakeHarnessError::Io(_)));
+        assert!(matches!(
+            LoadedFixture::load("/nonexistent/fixture/path"),
+            Err(FakeHarnessError::Io(_))
+        ));
     }
 
     #[test]
@@ -157,10 +157,10 @@ mod tests {
         std::fs::write(dir.path().join("events.jsonl"), "{ not json\n")
             .unwrap_or_else(|error| panic!("write events: {error}"));
 
-        let Err(error) = LoadedFixture::load(dir.path()) else {
-            panic!("expected serialization error");
-        };
-        assert!(matches!(error, FakeHarnessError::Serialization(_)));
+        assert!(matches!(
+            LoadedFixture::load(dir.path()),
+            Err(FakeHarnessError::Serialization(_))
+        ));
     }
 
     #[test]
@@ -169,10 +169,10 @@ mod tests {
         std::fs::write(dir.path().join("fixture.toml"), "events = [not valid")
             .unwrap_or_else(|error| panic!("write manifest: {error}"));
 
-        let Err(error) = LoadedFixture::load(dir.path()) else {
-            panic!("expected serialization error");
-        };
-        assert!(matches!(error, FakeHarnessError::Serialization(_)));
+        assert!(matches!(
+            LoadedFixture::load(dir.path()),
+            Err(FakeHarnessError::Serialization(_))
+        ));
     }
 
     #[test]
@@ -184,10 +184,10 @@ mod tests {
         )
         .unwrap_or_else(|error| panic!("write manifest: {error}"));
 
-        let Err(error) = LoadedFixture::load(dir.path()) else {
-            panic!("expected io error");
-        };
-        assert!(matches!(error, FakeHarnessError::Io(_)));
+        assert!(matches!(
+            LoadedFixture::load(dir.path()),
+            Err(FakeHarnessError::Io(_))
+        ));
     }
 
     #[test]

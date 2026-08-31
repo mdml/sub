@@ -8,6 +8,8 @@
 //! than on ACP schema types directly.
 
 pub mod acp;
+pub mod bridge;
+pub mod delegation;
 
 /// The crate version, as compiled from `Cargo.toml`.
 #[must_use]

@@ -75,10 +75,10 @@ mod tests {
 
     #[test]
     fn missing_scenario_file_errors() {
-        let Err(error) = Scenario::load("/nonexistent/scenario.toml") else {
-            panic!("expected io error");
-        };
-        assert!(matches!(error, FakeHarnessError::Io(_)));
+        assert!(matches!(
+            Scenario::load("/nonexistent/scenario.toml"),
+            Err(FakeHarnessError::Io(_))
+        ));
     }
 
     #[test]
@@ -97,9 +97,9 @@ mod tests {
         let path = dir.path().join("invalid.scenario.toml");
         std::fs::write(&path, "fixture = [not valid")
             .unwrap_or_else(|error| panic!("write scenario: {error}"));
-        let Err(error) = Scenario::load(path) else {
-            panic!("expected serialization error");
-        };
-        assert!(matches!(error, FakeHarnessError::Serialization(_)));
+        assert!(matches!(
+            Scenario::load(path),
+            Err(FakeHarnessError::Serialization(_))
+        ));
     }
 }

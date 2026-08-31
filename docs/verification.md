@@ -19,7 +19,9 @@ Runs on every push to a pull-request branch and on pull requests into `staging`.
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked` | Broken intra-doc link or rustdoc warning. |
 | Tests and coverage | `cargo llvm-cov --workspace --all-features --locked --fail-under-lines 90 --summary-only` | Any test fails, or line coverage over the workspace is 90 % or below. |
 
-The per-commit gate includes the behavioral contract suite (`crates/sub-sdk/tests/behavioral_contract.rs`) against the `sub-harness-fake` binary. Opt-in real-harness runs use `SUB_CONTRACT_REAL_HARNESS`; see [`nightlies/harness-compatibility.md`](nightlies/harness-compatibility.md).
+The per-commit gate includes the behavioral contract suite (`crates/sub-sdk/tests/behavioral_contract.rs`) against the `sub-harness-fake` binary, plus kernel and surface tests for durable launch/wait and bridge integrity. Opt-in real-harness runs use `SUB_CONTRACT_REAL_HARNESS` and the bridge path printed by `sub bridge install`; see [`nightlies/harness-compatibility.md`](nightlies/harness-compatibility.md).
+
+On 2026-08-31, real contract mode passed with Claude Code 2.1.251 through `@agentclientprotocol/claude-agent-acp` 0.70.0 and Codex CLI 0.151.0 through `@agentclientprotocol/codex-acp` 1.6.2. Both bridges were installed first by `sub` into a throwaway state directory. The contract entrypoint found no fake/real divergence, and separate full supervisor launch/wait runs succeeded through both adapters. The subsequent Delegate proof found that a Codex execute tool can create a file without an ACP edit location; result derivation and its tests now also recognize existing working-directory files linked from the streamed final Markdown.
 
 The coverage threshold is the same as the full gate's, so a change that passes here already meets `main`'s coverage requirement. Set `SUB_COVERAGE_MIN` to experiment locally; CI does not.
 

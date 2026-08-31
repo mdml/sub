@@ -9,7 +9,8 @@ use agent_client_protocol::schema::v1::{
     AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
     NewSessionResponse, PermissionOption, PermissionOptionId, PermissionOptionKind, PromptRequest,
     PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, SessionNotification,
-    StopReason, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, StopReason, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo, Responder, Stdio};
 
@@ -49,6 +50,22 @@ pub async fn run_stdio(
                             _connection: ConnectionTo<Client>| {
                     responder.respond(state.initialize_response(&request))
                 }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: SetSessionModeRequest,
+                        responder: Responder<SetSessionModeResponse>,
+                        _connection: ConnectionTo<Client>| {
+                responder.respond(SetSessionModeResponse::new())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: SetSessionConfigOptionRequest,
+                        responder: Responder<SetSessionConfigOptionResponse>,
+                        _connection: ConnectionTo<Client>| {
+                responder.respond(SetSessionConfigOptionResponse::new(Vec::new()))
             },
             agent_client_protocol::on_receive_request!(),
         )

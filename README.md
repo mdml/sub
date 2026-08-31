@@ -2,11 +2,30 @@
 
 Give the coding agent you already use subagents from any supported coding harness, with one durable place to observe the delegated work and retrieve its result.
 
-`sub` is in pre-beta. There is nothing to install yet.
+`sub` is in pre-beta. Claude Code and Codex can install their pinned ACP bridges, launch one bounded child task under an independent supervisor, and wait on the returned durable handle through CLI or MCP.
 
 ## Status
 
-Current phase: the repository is scaffolded; the fake harness and contract suite come next. The Agent Client Protocol boundary spike is resolved (`docs/spikes/acp-boundary.md`). See [`CHANGELOG.md`](CHANGELOG.md).
+Current proof: Delegate passes from a real Claude Code manager to a real Codex child. Observe, Recover, and Control remain later proofs. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md) and [`CHANGELOG.md`](CHANGELOG.md).
+
+## Try launch and wait
+
+Install each exact pinned bridge once. `npm` is required only for these explicit install commands.
+
+```sh
+cargo build -p sub-cli
+target/debug/sub bridge install claude
+target/debug/sub bridge install codex
+```
+
+Launch requires the child harness, bounded prompt, existing working directory, the user's harness binary, and a harness-native permission mode. It returns JSON immediately.
+
+```sh
+target/debug/sub launch --harness codex --cwd "$PWD" --prompt "Review the current change and report findings." --binary "$(command -v codex)" --permission-mode read-only
+target/debug/sub wait tsk_REPLACE_WITH_HANDLE --timeout-seconds 30
+```
+
+If wait returns `{"state":"running",...}`, call it again with the same handle. The MCP server binary is `target/debug/sub-mcp`; it exposes `sub_bridge_install`, `sub_launch`, and `sub_wait` with the same fields.
 
 ## Build
 

@@ -1,6 +1,7 @@
 //! ACP v1 client over stdio.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::Agent;
@@ -8,6 +9,7 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 use agent_client_protocol::{AcpAgent, Client, ConnectionTo};
 
@@ -25,7 +27,16 @@ pub struct PromptOptions {
     pub timeout: Option<Duration>,
     /// Send `session/cancel` after this delay once the prompt starts.
     pub cancel_after: Option<Duration>,
+    /// Harness-native ACP mode identifier applied before prompting.
+    pub permission_mode: Option<String>,
+    /// Harness-native model identifier applied before prompting.
+    pub model: Option<String>,
+    /// Bridge-specific `_meta` attached to `session/new`.
+    pub session_meta: Option<serde_json::Value>,
 }
+
+/// Thread-safe callback invoked for each normalized stream update.
+pub type UpdateObserver = Arc<dyn Fn(StreamUpdate) + Send + Sync>;
 
 /// Configuration for driving one ACP agent process.
 #[derive(Debug, Clone)]
@@ -52,7 +63,22 @@ impl AcpClient {
         prompt: &str,
         options: PromptOptions,
     ) -> Result<(SessionHandle, PromptResult), AcpError> {
-        let run = self.run_prompt_turn(cwd, prompt, &options);
+        self.prompt_turn_observing(cwd, prompt, options, None).await
+    }
+
+    /// Run one prompt turn and notify an observer as updates arrive.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AcpError`] when the agent process, negotiation, or turn fails.
+    pub async fn prompt_turn_observing(
+        &self,
+        cwd: impl AsRef<Path>,
+        prompt: &str,
+        options: PromptOptions,
+        observer: Option<UpdateObserver>,
+    ) -> Result<(SessionHandle, PromptResult), AcpError> {
+        let run = self.run_prompt_turn(cwd, prompt, &options, observer);
         match options.timeout {
             Some(duration) => tokio::time::timeout(duration, run)
                 .await
@@ -61,11 +87,16 @@ impl AcpClient {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the ACP connection lifecycle must remain inside one connection callback"
+    )]
     async fn run_prompt_turn(
         &self,
         cwd: impl AsRef<Path>,
         prompt: &str,
         options: &PromptOptions,
+        observer: Option<UpdateObserver>,
     ) -> Result<(SessionHandle, PromptResult), AcpError> {
         let cwd = cwd.as_ref().to_path_buf();
         let prompt = prompt.to_owned();
@@ -81,11 +112,16 @@ impl AcpClient {
             .on_receive_request(
                 {
                     let update_tx = update_tx.clone();
+                    let observer = observer.clone();
                     async move |request: RequestPermissionRequest,
                                 responder,
                                 _connection: ConnectionTo<Agent>| {
+                        let update = StreamUpdate::permission_denied(&request);
+                        if let Some(observer) = &observer {
+                            observer(update.clone());
+                        }
                         update_tx
-                            .send(StreamUpdate::permission_denied(&request))
+                            .send(update)
                             .map_err(|_| agent_client_protocol::Error::internal_error())?;
                         deny_permission(responder)
                     }
@@ -93,10 +129,18 @@ impl AcpClient {
                 agent_client_protocol::on_receive_request!(),
             )
             .on_receive_notification(
-                async move |notification: SessionNotification, _connection: ConnectionTo<Agent>| {
-                    update_tx
-                        .send(StreamUpdate::from_session_update(&notification.update))
-                        .map_err(|_| agent_client_protocol::Error::internal_error())
+                {
+                    let observer = observer.clone();
+                    async move |notification: SessionNotification,
+                                _connection: ConnectionTo<Agent>| {
+                        let update = StreamUpdate::from_session_update(&notification.update);
+                        if let Some(observer) = &observer {
+                            observer(update.clone());
+                        }
+                        update_tx
+                            .send(update)
+                            .map_err(|_| agent_client_protocol::Error::internal_error())
+                    }
                 },
                 agent_client_protocol::on_receive_notification!(),
             )
@@ -106,14 +150,39 @@ impl AcpClient {
                     .block_task()
                     .await?;
 
-                let session = connection
-                    .send_request(NewSessionRequest::new(&cwd))
-                    .block_task()
-                    .await?;
+                let mut request = NewSessionRequest::new(&cwd);
+                if let Some(meta) = &options.session_meta {
+                    let map = meta
+                        .as_object()
+                        .cloned()
+                        .ok_or_else(agent_client_protocol::Error::invalid_params)?;
+                    request = request.meta(map);
+                }
+                let session = connection.send_request(request).block_task().await?;
 
                 let handle = SessionHandle {
                     session_id: session.session_id.to_string(),
                 };
+
+                if let Some(mode) = &options.permission_mode {
+                    connection
+                        .send_request(SetSessionModeRequest::new(
+                            session.session_id.clone(),
+                            mode.clone(),
+                        ))
+                        .block_task()
+                        .await?;
+                }
+                if let Some(model) = &options.model {
+                    connection
+                        .send_request(SetSessionConfigOptionRequest::new(
+                            session.session_id.clone(),
+                            "model",
+                            model.as_str(),
+                        ))
+                        .block_task()
+                        .await?;
+                }
 
                 if let Some(delay) = cancel_after {
                     let connection = connection.clone();

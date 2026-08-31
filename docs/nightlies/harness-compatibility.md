@@ -16,14 +16,14 @@ Run `scripts/nightly/harness-compatibility.sh` once a day from the owner's sched
 
 ## Real-harness mode
 
-The contract suite lives in `crates/sub-sdk/tests/behavioral_contract.rs`. CI runs the fake-harness cases on every per-commit gate. Locally, set `SUB_CONTRACT_REAL_HARNESS` to `claude`, `codex`, or `cursor-agent` (optional override: `SUB_CONTRACT_HARNESS_CMD`) before running:
+The contract suite lives in `crates/sub-sdk/tests/behavioral_contract.rs`. CI runs the fake-harness cases on every per-commit gate. Install a bridge explicitly, then set `SUB_CONTRACT_REAL_HARNESS` and `SUB_CONTRACT_HARNESS_CMD` to the printed bridge path before running:
 
 ```sh
-SUB_CONTRACT_REAL_HARNESS=codex cargo test -p sub-sdk --test behavioral_contract
+SUB_CONTRACT_REAL_HARNESS=codex SUB_CONTRACT_HARNESS_CMD=/path/printed/by/sub cargo test -p sub-sdk --test behavioral_contract real_harness_mode_entrypoint
 ```
 
-The nightly script sets that variable per installed harness and runs `real_harness_mode_entrypoint`.
+The nightly reads `SUB_CONTRACT_CLAUDE_CMD` and `SUB_CONTRACT_CODEX_CMD` for previously installed bridge paths, sets the user's harness executable side channels, and runs `real_harness_mode_entrypoint`. It never installs or fetches a bridge. Cursor continues to use its native `acp` command.
 
 ## Status
 
-The contract suite and fake harness exist. Adapter version constants and bridge comparison remain stubs until item 3 (adapters); the nightly logs that gap and still runs real-harness contract tests when harnesses are installed.
+The contract suite, fake harness, Claude adapter, and Codex adapter exist. The nightly reports their pinned and verified versions; automatic comparison and the Cursor adapter remain later work.

@@ -2,8 +2,8 @@
 //!
 //! By default these tests drive the programmable fake harness. Set
 //! `SUB_CONTRACT_REAL_HARNESS` to `claude`, `codex`, or `cursor-agent` to run
-//! the same assertions against a locally installed bridge, optionally overriding
-//! the launch command with `SUB_CONTRACT_HARNESS_CMD`.
+//! the same assertions against a local harness. Claude and Codex also require
+//! `SUB_CONTRACT_HARNESS_CMD` to name a bridge installed by `sub`.
 
 mod common;
 
@@ -123,6 +123,7 @@ async fn cancellation_ignored() {
         PromptOptions {
             timeout: Some(Duration::from_secs(10)),
             cancel_after: Some(Duration::from_millis(50)),
+            ..PromptOptions::default()
         },
     )
     .await

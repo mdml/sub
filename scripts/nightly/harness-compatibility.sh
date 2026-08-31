@@ -27,11 +27,11 @@ for h in claude codex cursor-agent; do
 done
 
 log ""
-log "harness-compatibility: adapter declared versions (stubs until item 3)"
-log "  sub-adapter-claude: not declared yet"
-log "  sub-adapter-codex: not declared yet"
+log "harness-compatibility: adapter declared versions"
+log "  sub-adapter-claude: bridge @agentclientprotocol/claude-agent-acp@0.70.0; claude 2.1.246, 2.1.251"
+log "  sub-adapter-codex: bridge @agentclientprotocol/codex-acp@1.6.2; codex 0.149.1, 0.151.0"
 log "  sub-adapter-cursor: not declared yet"
-log "  version mismatches are reported only; adapters do not exist yet"
+log "  version mismatches are reported only"
 
 log ""
 log "harness-compatibility: behavioral contract suite (real-harness mode)"
@@ -51,10 +51,22 @@ run_real() {
         log "  $name: skipped (not installed)"
         return 0
     fi
+    command_override=""
+    case "$name" in
+        claude) command_override=${SUB_CONTRACT_CLAUDE_CMD:-} ;;
+        codex) command_override=${SUB_CONTRACT_CODEX_CMD:-} ;;
+    esac
+    if [ "$name" != "cursor-agent" ] && [ -z "$command_override" ]; then
+        log "  $name: skipped (set SUB_CONTRACT_$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')_CMD to the path printed by sub bridge install $name)"
+        return 0
+    fi
     log "  $name: running contract suite"
     if (
         cd "$WORK" &&
             SUB_CONTRACT_REAL_HARNESS="$name" \
+            SUB_CONTRACT_HARNESS_CMD="$command_override" \
+            CLAUDE_CODE_EXECUTABLE="$(command -v claude || true)" \
+            CODEX_PATH="$(command -v codex || true)" \
             cargo test -p sub-sdk --test behavioral_contract real_harness_mode_entrypoint --locked -- --nocapture
     ); then
         log "  $name: pass"

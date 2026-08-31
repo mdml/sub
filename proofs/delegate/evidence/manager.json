@@ -1,0 +1,12 @@
+{
+  "manager": "claude 2.1.251",
+  "child": "codex-cli 0.151.0",
+  "date": "2026-08-31",
+  "stop_reason": "end_turn",
+  "terminal_reason": "completed",
+  "duration_ms": 54185,
+  "total_cost_usd": 0.724972,
+  "manager_subagents_spawned": 0,
+  "wait_calls": 1,
+  "result_status": "succeeded"
+}
