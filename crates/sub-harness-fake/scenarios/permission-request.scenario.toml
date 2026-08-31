@@ -1,0 +1,2 @@
+fixture = "minimal"
+behavior = "permission_request"

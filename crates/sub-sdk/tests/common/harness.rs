@@ -17,6 +17,7 @@ pub enum FakeScenario {
     IgnoreCancel,
     CancelHonored,
     Malformed,
+    PermissionRequest,
 }
 
 impl FakeScenario {
@@ -29,6 +30,7 @@ impl FakeScenario {
             Self::IgnoreCancel => "ignore-cancel",
             Self::CancelHonored => "cancel_honored",
             Self::Malformed => "malformed",
+            Self::PermissionRequest => "permission-request",
         }
     }
 }

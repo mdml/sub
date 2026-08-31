@@ -83,6 +83,42 @@ async fn replays_minimal_fixture() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn permission_request_is_denied_and_surfaced() {
+    let launch = HarnessLaunch::new(harness_binary())
+        .arg("permission-request")
+        .env(
+            "SUB_FAKE_FIXTURES_DIR",
+            sub_harness_fake::fixtures_dir()
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .env(
+            "SUB_FAKE_SCENARIOS_DIR",
+            sub_harness_fake::scenarios_dir()
+                .to_string_lossy()
+                .into_owned(),
+        );
+
+    let (_handle, result) = AcpClient::new(launch, AcpClientConfig::default())
+        .prompt_turn(
+            std::env::temp_dir(),
+            "permission",
+            PromptOptions {
+                timeout: Some(Duration::from_secs(10)),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert!(result.updates.iter().any(|update| {
+        update.kind == StreamUpdateKind::PermissionDenied
+            && update.text.as_deref() == Some("Write fixture output")
+    }));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn ignore_cancel_scenario_completes() {
     let fixtures = sub_harness_fake::fixtures_dir();
     let scenarios = sub_harness_fake::scenarios_dir();
@@ -262,4 +298,14 @@ fn binary_exits_when_scenario_missing() {
         .output()
         .unwrap_or_else(|error| panic!("run binary: {error}"));
     assert!(!output.status.success());
+}
+
+#[test]
+fn binary_reports_unknown_scenario() {
+    let output = Command::new(harness_binary())
+        .arg("does-not-exist")
+        .output()
+        .unwrap_or_else(|error| panic!("run binary: {error}"));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("I/O error"));
 }

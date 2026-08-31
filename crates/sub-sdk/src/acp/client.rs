@@ -6,13 +6,12 @@ use std::time::Duration;
 use agent_client_protocol::Agent;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    InitializeRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionNotification,
+    InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
 };
-use agent_client_protocol::util::MatchDispatch;
-use agent_client_protocol::{AcpAgent, Client, ConnectionTo, SessionMessage};
+use agent_client_protocol::{AcpAgent, Client, ConnectionTo};
 
-use super::config::{AcpClientConfig, PermissionPolicy};
+use super::config::AcpClientConfig;
 use super::error::AcpError;
 use super::launch::HarnessLaunch;
 use super::session::{PromptResult, SessionHandle};
@@ -71,21 +70,35 @@ impl AcpClient {
         let cwd = cwd.as_ref().to_path_buf();
         let prompt = prompt.to_owned();
         let cancel_after = options.cancel_after;
-        let permission_policy = self.config.permission_policy;
         let client_name = self.config.client_name.clone();
         let agent = AcpAgent::new(self.launch.clone().into_acp_config());
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let (update_tx, mut update_rx) = tokio::sync::mpsc::unbounded_channel();
 
         Client
             .builder()
             .name(&client_name)
             .on_receive_request(
-                async move |request: RequestPermissionRequest,
-                            responder,
-                            _connection: ConnectionTo<Agent>| {
-                    respond_to_permission(&request, responder, permission_policy)
+                {
+                    let update_tx = update_tx.clone();
+                    async move |request: RequestPermissionRequest,
+                                responder,
+                                _connection: ConnectionTo<Agent>| {
+                        update_tx
+                            .send(StreamUpdate::permission_denied(&request))
+                            .map_err(|_| agent_client_protocol::Error::internal_error())?;
+                        deny_permission(responder)
+                    }
                 },
                 agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_notification(
+                async move |notification: SessionNotification, _connection: ConnectionTo<Agent>| {
+                    update_tx
+                        .send(StreamUpdate::from_session_update(&notification.update))
+                        .map_err(|_| agent_client_protocol::Error::internal_error())
+                },
+                agent_client_protocol::on_receive_notification!(),
             )
             .connect_with(agent, async move |connection| {
                 connection
@@ -93,70 +106,49 @@ impl AcpClient {
                     .block_task()
                     .await?;
 
-                let turn_result = connection
-                    .build_session(&cwd)
+                let session = connection
+                    .send_request(NewSessionRequest::new(&cwd))
                     .block_task()
-                    .run_until(async move |mut session| {
-                        let handle = SessionHandle {
-                            session_id: session.session_id().to_string(),
-                        };
-
-                        if let Some(delay) = cancel_after {
-                            let connection = session.connection().clone();
-                            let session_id = session.session_id().clone();
-                            tokio::spawn(async move {
-                                tokio::time::sleep(delay).await;
-                                let _ = connection.send_notification(
-                                    agent_client_protocol::schema::v1::CancelNotification::new(
-                                        session_id,
-                                    ),
-                                );
-                            });
-                        }
-
-                        session.send_prompt(&prompt)?;
-
-                        let mut updates = Vec::new();
-                        let mut final_text = String::new();
-
-                        loop {
-                            let message = session.read_update().await?;
-                            match message {
-                                SessionMessage::SessionMessage(dispatch) => {
-                                    MatchDispatch::new(dispatch)
-                                        .if_notification(
-                                            async |notification: SessionNotification| {
-                                                let update = StreamUpdate::from_session_update(
-                                                    &notification.update,
-                                                );
-                                                if update.kind
-                                                    == super::update::StreamUpdateKind::AgentMessageChunk
-                                                    && let Some(text) = &update.text
-                                                {
-                                                    final_text.push_str(text);
-                                                }
-                                                updates.push(update);
-                                                Ok(())
-                                            },
-                                        )
-                                        .await
-                                        .otherwise_ignore()?;
-                                }
-                                SessionMessage::StopReason(stop_reason) => {
-                                    return Ok((
-                                        handle,
-                                        PromptResult {
-                                            stop_reason: StopReason::from(stop_reason),
-                                            updates,
-                                            final_text,
-                                        },
-                                    ));
-                                }
-                                _ => {}
-                            }
-                        }
-                    })
                     .await?;
+
+                let handle = SessionHandle {
+                    session_id: session.session_id.to_string(),
+                };
+
+                if let Some(delay) = cancel_after {
+                    let connection = connection.clone();
+                    let session_id = session.session_id.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(delay).await;
+                        let _ = connection.send_notification(
+                            agent_client_protocol::schema::v1::CancelNotification::new(session_id),
+                        );
+                    });
+                }
+
+                let response = connection
+                    .send_request(PromptRequest::new(session.session_id, vec![prompt.into()]))
+                    .block_task()
+                    .await?;
+
+                let mut updates = Vec::new();
+                let mut final_text = String::new();
+                while let Ok(update) = update_rx.try_recv() {
+                    if update.kind == super::update::StreamUpdateKind::AgentMessageChunk
+                        && let Some(text) = &update.text
+                    {
+                        final_text.push_str(text);
+                    }
+                    updates.push(update);
+                }
+                let turn_result = (
+                    handle,
+                    PromptResult {
+                        stop_reason: StopReason::from(response.stop_reason),
+                        updates,
+                        final_text,
+                    },
+                );
 
                 result_tx
                     .send(turn_result)
@@ -171,44 +163,20 @@ impl AcpClient {
     }
 }
 
-fn permission_response(
-    request: &RequestPermissionRequest,
-    policy: PermissionPolicy,
-) -> RequestPermissionResponse {
-    match policy {
-        PermissionPolicy::DenyAll => {
-            RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
-        }
-        PermissionPolicy::AutoApproveFirst => {
-            let option_id = request
-                .options
-                .iter()
-                .find(|option| option.option_id.0.starts_with("allow"))
-                .map(|option| option.option_id.clone());
-            if let Some(id) = option_id {
-                RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
-                    SelectedPermissionOutcome::new(id),
-                ))
-            } else {
-                RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
-            }
-        }
-    }
+fn deny_permission(
+    responder: agent_client_protocol::Responder<RequestPermissionResponse>,
+) -> Result<(), agent_client_protocol::Error> {
+    responder.respond(permission_response())
 }
 
-fn respond_to_permission(
-    request: &RequestPermissionRequest,
-    responder: agent_client_protocol::Responder<RequestPermissionResponse>,
-    policy: PermissionPolicy,
-) -> Result<(), agent_client_protocol::Error> {
-    responder.respond(permission_response(request, policy))
+fn permission_response() -> RequestPermissionResponse {
+    RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
 }
 
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
-        PermissionOption, PermissionOptionId, PermissionOptionKind, RequestPermissionRequest,
-        SessionId, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
+        RequestPermissionRequest, SessionId, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
     };
 
     use super::*;
@@ -220,47 +188,32 @@ mod tests {
         assert!(options.cancel_after.is_none());
     }
 
-    fn sample_permission_request(options: Vec<PermissionOption>) -> RequestPermissionRequest {
+    fn sample_permission_request() -> RequestPermissionRequest {
         RequestPermissionRequest::new(
             SessionId::new("session"),
-            ToolCallUpdate::new(ToolCallId::new("tool"), ToolCallUpdateFields::default()),
-            options,
+            ToolCallUpdate::new(
+                ToolCallId::new("tool"),
+                ToolCallUpdateFields::default().title("Run a command"),
+            ),
+            Vec::new(),
         )
     }
 
     #[test]
-    fn deny_all_permission_policy_cancels() {
-        let request = sample_permission_request(vec![PermissionOption::new(
-            PermissionOptionId::new("allow-once"),
-            "Allow once",
-            PermissionOptionKind::AllowOnce,
-        )]);
-        let response = permission_response(&request, PermissionPolicy::DenyAll);
-        assert_eq!(response.outcome, RequestPermissionOutcome::Cancelled);
+    fn permission_denial_update_names_tool_call() {
+        let update = StreamUpdate::permission_denied(&sample_permission_request());
+        assert_eq!(
+            update.kind,
+            super::super::update::StreamUpdateKind::PermissionDenied
+        );
+        assert_eq!(update.text.as_deref(), Some("Run a command"));
     }
 
     #[test]
-    fn auto_approve_first_selects_allow_option() {
-        let request = sample_permission_request(vec![PermissionOption::new(
-            PermissionOptionId::new("allow-always"),
-            "Allow always",
-            PermissionOptionKind::AllowAlways,
-        )]);
-        let response = permission_response(&request, PermissionPolicy::AutoApproveFirst);
-        assert!(matches!(
-            response.outcome,
-            RequestPermissionOutcome::Selected(_)
-        ));
-    }
-
-    #[test]
-    fn auto_approve_first_cancels_without_allow_option() {
-        let request = sample_permission_request(vec![PermissionOption::new(
-            PermissionOptionId::new("deny"),
-            "Deny",
-            PermissionOptionKind::RejectOnce,
-        )]);
-        let response = permission_response(&request, PermissionPolicy::AutoApproveFirst);
-        assert_eq!(response.outcome, RequestPermissionOutcome::Cancelled);
+    fn permission_response_is_always_cancelled() {
+        assert_eq!(
+            permission_response().outcome,
+            RequestPermissionOutcome::Cancelled
+        );
     }
 }

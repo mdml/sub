@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::super::error::AcpError;
-use super::super::stop_reason::StopReason;
+use sub_sdk::acp::StopReason;
+
+use crate::FakeHarnessError;
 
 /// Provenance stamp on a fixture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,13 +93,13 @@ impl LoadedFixture {
     ///
     /// # Errors
     ///
-    /// Returns [`AcpError`] when the manifest or event stream cannot be read or parsed.
-    pub fn load(dir: impl AsRef<Path>) -> Result<Self, AcpError> {
+    /// Returns [`FakeHarnessError`] when the manifest or event stream cannot be read or parsed.
+    pub fn load(dir: impl AsRef<Path>) -> Result<Self, FakeHarnessError> {
         let dir = dir.as_ref().to_path_buf();
         let manifest_path = dir.join("fixture.toml");
-        let manifest_text = fs::read_to_string(&manifest_path).map_err(AcpError::Io)?;
+        let manifest_text = fs::read_to_string(&manifest_path).map_err(FakeHarnessError::Io)?;
         let manifest: FixtureManifest =
-            toml::from_str(&manifest_text).map_err(AcpError::serialization)?;
+            toml::from_str(&manifest_text).map_err(FakeHarnessError::serialization)?;
 
         let events_path = dir.join(&manifest.events);
         let events = load_events_jsonl(&events_path)?;
@@ -111,15 +112,15 @@ impl LoadedFixture {
     }
 }
 
-fn load_events_jsonl(path: &Path) -> Result<Vec<RecordedEvent>, AcpError> {
-    let text = fs::read_to_string(path).map_err(AcpError::Io)?;
+fn load_events_jsonl(path: &Path) -> Result<Vec<RecordedEvent>, FakeHarnessError> {
+    let text = fs::read_to_string(path).map_err(FakeHarnessError::Io)?;
     let mut events = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
         let event: RecordedEvent = serde_json::from_str(line).map_err(|error| {
-            AcpError::serialization(format!("{}:{}: {error}", path.display(), index + 1))
+            FakeHarnessError::serialization(format!("{}:{}: {error}", path.display(), index + 1))
         })?;
         events.push(event);
     }
@@ -142,7 +143,7 @@ mod tests {
         let Err(error) = LoadedFixture::load("/nonexistent/fixture/path") else {
             panic!("expected io error");
         };
-        assert!(matches!(error, AcpError::Io(_)));
+        assert!(matches!(error, FakeHarnessError::Io(_)));
     }
 
     #[test]
@@ -159,7 +160,34 @@ mod tests {
         let Err(error) = LoadedFixture::load(dir.path()) else {
             panic!("expected serialization error");
         };
-        assert!(matches!(error, AcpError::Serialization(_)));
+        assert!(matches!(error, FakeHarnessError::Serialization(_)));
+    }
+
+    #[test]
+    fn invalid_manifest_toml_errors() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        std::fs::write(dir.path().join("fixture.toml"), "events = [not valid")
+            .unwrap_or_else(|error| panic!("write manifest: {error}"));
+
+        let Err(error) = LoadedFixture::load(dir.path()) else {
+            panic!("expected serialization error");
+        };
+        assert!(matches!(error, FakeHarnessError::Serialization(_)));
+    }
+
+    #[test]
+    fn missing_event_stream_errors() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        std::fs::write(
+            dir.path().join("fixture.toml"),
+            "events = \"missing.jsonl\"\n\n[source]\nkind = \"synthetic\"\n\n[prompt]\nstop_reason = \"end_turn\"\n\n[agent]\nname = \"fake\"\ntitle = \"Fake\"\nversion = \"0.0.0\"\n\n[session]\nsession_id = \"s1\"\n",
+        )
+        .unwrap_or_else(|error| panic!("write manifest: {error}"));
+
+        let Err(error) = LoadedFixture::load(dir.path()) else {
+            panic!("expected io error");
+        };
+        assert!(matches!(error, FakeHarnessError::Io(_)));
     }
 
     #[test]

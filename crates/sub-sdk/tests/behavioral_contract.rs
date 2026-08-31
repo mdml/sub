@@ -77,6 +77,28 @@ async fn launch_and_stream_consumption_recorded_codex_fixture() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn permission_request_is_denied_and_surfaced() {
+    let harness = ContractHarness::select(FakeScenario::PermissionRequest);
+    let (_handle, result) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(10)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    let denial = result
+        .updates
+        .iter()
+        .find(|update| update.kind == StreamUpdateKind::PermissionDenied)
+        .unwrap_or_else(|| panic!("permission denial update"));
+    assert_eq!(denial.text.as_deref(), Some("Write fixture output"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancellation_honored() {
     let harness = ContractHarness::select(FakeScenario::CancelHonored);

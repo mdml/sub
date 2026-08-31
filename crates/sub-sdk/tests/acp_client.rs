@@ -7,10 +7,9 @@ use std::time::Duration;
 
 use fake_binary::fake_binary;
 
-use sub_sdk::acp::replay::{FixtureSource, LoadedFixture, Scenario, ScenarioBehavior};
+use sub_harness_fake::{FixtureSource, LoadedFixture, Scenario, ScenarioBehavior};
 use sub_sdk::acp::{
-    AcpClient, AcpClientConfig, AcpError, HarnessLaunch, PermissionPolicy, PromptOptions,
-    StopReason,
+    AcpClient, AcpClientConfig, AcpError, HarnessLaunch, PromptOptions, StopReason,
 };
 
 #[test]
@@ -30,7 +29,6 @@ fn harness_launch_builder() {
 fn acp_client_config_defaults() {
     let config = AcpClientConfig::default();
     assert_eq!(config.client_name, "sub");
-    assert_eq!(config.permission_policy, PermissionPolicy::AutoApproveFirst);
 }
 
 #[test]

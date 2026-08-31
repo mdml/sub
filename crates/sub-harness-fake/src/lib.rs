@@ -1,7 +1,17 @@
 //! Programmable fake harness for the behavioral contract suite.
 //!
-//! Binary entry point: `sub-harness-fake`. Library helpers live in
-//! [`sub_sdk::acp::replay`].
+//! Binary entry point: `sub-harness-fake`. This crate also owns the fixture,
+//! scenario, and replay-server implementation used by the contract suite.
+
+mod error;
+mod fixture;
+mod scenario;
+mod server;
+
+pub use error::FakeHarnessError;
+pub use fixture::{FixtureManifest, FixtureSource, LoadedFixture, RecordedEvent};
+pub use scenario::{Scenario, ScenarioBehavior};
+pub use server::run_stdio;
 
 use std::env;
 use std::path::PathBuf;
@@ -34,7 +44,7 @@ pub async fn run_from_env() -> Result<(), Box<dyn std::error::Error>> {
     let scenario = scenario_name()?;
     let (scenarios_root, fixtures_root) = resolve_roots();
 
-    sub_sdk::acp::replay::run_stdio(&scenarios_root, &fixtures_root, &scenario).await?;
+    run_stdio(&scenarios_root, &fixtures_root, &scenario).await?;
     Ok(())
 }
 
