@@ -1,6 +1,6 @@
 # Bridge pinning and installation
 
-Date: 2026-08-27. Status: adopted (design only; no installer code yet).
+Date: 2026-08-27. Status: adopted and implemented 2026-08-31.
 
 ## Decision
 

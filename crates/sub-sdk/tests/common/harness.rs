@@ -93,17 +93,18 @@ fn fake_launch(scenario: FakeScenario) -> HarnessLaunch {
 }
 
 fn real_launch(name: &str) -> HarnessLaunch {
-    if let Ok(command) = env::var("SUB_CONTRACT_HARNESS_CMD") {
+    if let Ok(command) = env::var("SUB_CONTRACT_HARNESS_CMD")
+        && !command.is_empty()
+    {
         return parse_command_line(&command);
     }
 
     match name {
-        "codex" => parse_command_line("npx --yes @agentclientprotocol/codex-acp@1.6.2"),
-        "claude" => parse_command_line("npx --yes @agentclientprotocol/claude-agent-acp@0.70.0"),
         "cursor-agent" => HarnessLaunch::new("cursor-agent").arg("acp"),
-        other => {
-            panic!("unknown SUB_CONTRACT_REAL_HARNESS={other:?}; set SUB_CONTRACT_HARNESS_CMD")
-        }
+        "claude" | "codex" => panic!(
+            "set SUB_CONTRACT_HARNESS_CMD to the bridge path printed by `sub bridge install {name}`"
+        ),
+        other => panic!("unknown SUB_CONTRACT_REAL_HARNESS={other:?}"),
     }
 }
 

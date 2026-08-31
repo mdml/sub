@@ -117,6 +117,7 @@ async fn prompt_turn_times_out_on_hang() {
             "timeout probe",
             PromptOptions {
                 timeout: Some(Duration::from_millis(200)),
+                cancel_after: Some(Duration::from_millis(10)),
                 ..PromptOptions::default()
             },
         )

@@ -141,6 +141,7 @@ async fn ignore_cancel_scenario_completes() {
             PromptOptions {
                 timeout: Some(Duration::from_secs(10)),
                 cancel_after: Some(Duration::from_millis(50)),
+                ..PromptOptions::default()
             },
         )
         .await

@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Delegated-work kernel in `sub-sdk`: opaque task handles, one persisted execution attempt, independent per-attempt supervisors, append-only events, repeatable bounded wait, and results derived from ACP streams and stop reasons.
+- Claude Code and Codex adapters with exact bridge/version declarations, user-harness binary selection, permission-mode/model forwarding, subagent restrictions, and native session records retained by reference.
+- Explicit pinned bridge installation through CLI and MCP with per-version manifests and SHA-256 tree integrity checks; launch never fetches a bridge.
+- CLI commands `sub bridge install`, `sub launch`, and `sub wait`; MCP tools `sub_bridge_install`, `sub_launch`, and `sub_wait` with matching controls.
+- Re-runnable Claude-manager to Codex-child Delegate proof and scrubbed captured evidence under `docs/proofs/` and `proofs/delegate/`.
+
 - Shared ACP client layer in `sub-sdk` (`sub_sdk::acp`): spawn agent over stdio, protocol v1, session + prompt, update stream, deny and surface permission requests, cancel, timeout.
 - Programmable fake harness binary `sub-harness-fake` with fixture replay and scenario scripting (`replay`, `hang`, `die_mid_stream`, `ignore_cancel`, `cancel_honored`, `malformed`).
 - Initial fixtures from spike evidence (`codex-hello`) and synthetic minimal streams; decision records for fixture and scenario formats (2026-08-31).

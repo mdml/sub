@@ -25,6 +25,12 @@ tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "process
 agent-client-protocol = "=2.0.0"
 sub-sdk = { path = "crates/sub-sdk", version = "=0.0.0" }
 sub-harness-fake = { path = "crates/sub-harness-fake", version = "=0.0.0" }
+sub-adapter-claude = { path = "crates/sub-adapter-claude", version = "=0.0.0" }
+sub-adapter-codex = { path = "crates/sub-adapter-codex", version = "=0.0.0" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
+hex = "=0.4.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
