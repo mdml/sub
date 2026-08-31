@@ -13,4 +13,4 @@ All notable changes to this project are documented here. The format follows [Kee
 - GitHub Actions: per-commit gate, full gate, nightly vulnerability and freshness checks, Dependabot, and a `cargo-dist` release workflow (no release cut).
 - Project-level harness configuration for `claude`, `codex`, and `cursor-agent`.
 - Documentation skeleton under `docs/` with decision records dated 2026-08-27, including the bridge pinning design.
-- On-machine nightly jobs under `docs/nightlies/` and `scripts/nightly/`; the mental-model audit runs through Dogtag MCP, records its agent cost and review fields, and reports the experiment's four discrepancy classes.
+- On-machine nightly jobs under `docs/nightlies/` and `scripts/nightly/`; the mental-model audit runs through Dogtag MCP, checks canonical repository documentation against implementation before applying the experiment's four discrepancy classes, records cost and review fields, and leaves fixes to separate PRs.
