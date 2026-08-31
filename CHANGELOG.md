@@ -13,4 +13,4 @@ All notable changes to this project are documented here. The format follows [Kee
 - GitHub Actions: per-commit gate, full gate, nightly vulnerability and freshness checks, Dependabot, and a `cargo-dist` release workflow (no release cut).
 - Project-level harness configuration for `claude`, `codex`, and `cursor-agent`.
 - Documentation skeleton under `docs/` with decision records dated 2026-08-27, including the bridge pinning design.
-- On-machine nightly job definitions under `docs/nightlies/` and `scripts/nightly/`.
+- Project-specific harness-compatibility nightly definition under `docs/nightlies/` and `scripts/nightly/`.

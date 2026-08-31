@@ -8,6 +8,10 @@
       "Shell(git status)",
       "Shell(git diff)",
       "Shell(git log)",
+      "Shell(git add)",
+      "Shell(git commit)",
+      "Shell(git push)",
+      "Shell(gh pr create)",
       "Shell(gh pr view)",
       "Shell(gh pr checks)"
     ],

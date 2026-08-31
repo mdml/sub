@@ -10,6 +10,6 @@ Product intent, decided boundaries, beta scope, and the proofs that gate release
 | [`verification.md`](verification.md) | The verification entry point, the two gates, and what CI runs. |
 | [`harnesses.md`](harnesses.md) | How `claude`, `codex`, and `cursor-agent` are configured to develop this repository. |
 | [`decisions/`](decisions/README.md) | Decision records: one file per repository-level decision, dated. |
-| [`nightlies/`](nightlies/README.md) | The on-machine nightly jobs, as scripts the owner schedules. |
+| [`nightlies/`](nightlies/README.md) | The project-specific harness-compatibility nightly definition. |
 | [`spikes/`](spikes/) | Spike reports. Evidence only; the mental model says what was decided. |
 | [`release.md`](release.md) | How releases will be built, signed, and published. |
