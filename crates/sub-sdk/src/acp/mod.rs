@@ -5,19 +5,16 @@
 //! streams, cancelling turns, and timing out. Adapters and surfaces consume
 //! these types rather than depending on ACP schema crates directly.
 //!
-//! The [`replay`] submodule supports the programmable fake harness.
-
 pub mod client;
 pub mod config;
 pub mod error;
 pub mod launch;
-pub mod replay;
 pub mod session;
 pub mod stop_reason;
 pub mod update;
 
 pub use client::{AcpClient, PromptOptions};
-pub use config::{AcpClientConfig, PermissionPolicy};
+pub use config::AcpClientConfig;
 pub use error::AcpError;
 pub use launch::HarnessLaunch;
 pub use session::{PromptResult, SessionHandle};

@@ -54,5 +54,9 @@ mod tests {
             StopReason::from(AcpStopReason::EndTurn),
             StopReason::EndTurn
         );
+        assert_eq!(
+            StopReason::from(AcpStopReason::MaxTokens),
+            StopReason::MaxTokens
+        );
     }
 }

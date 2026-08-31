@@ -4,7 +4,7 @@ Date: 2026-08-31. Status: adopted.
 
 ## Decision
 
-Each fixture is a directory containing `fixture.toml` (manifest) and a JSONL event stream file named by the manifest's top-level `events` key. The manifest records provenance (`source.kind = "recorded"` with harness name and version, or `"synthetic"`), agent identity for `initialize`, default `session_id`, prompt defaults (`stop_reason`, optional `replay_timing`), and the events filename. Event lines follow the spike capture shape: `{ "t_ms", "kind", "notification" }` where `kind` is typically `session/update` and `notification` is a serialized ACP `SessionNotification`. Top-level manifest keys must appear before any `[table]` header in TOML so they are not parsed into the wrong table.
+Each fixture is a directory containing `fixture.toml` (manifest) and a JSONL event stream file named by the manifest's top-level `events` key. The manifest records provenance (`source.kind = "recorded"` with harness name and version, or `"synthetic"`), agent identity for `initialize`, default `session_id`, prompt defaults (`stop_reason`, optional `replay_timing`), and the events filename. Event lines follow the spike capture shape: `{ "t_ms", "kind", "notification" }` where `kind` is typically `session/update` and `notification` is a serialized ACP `SessionNotification`. Top-level manifest keys must appear before any `[table]` header in TOML so they are not parsed into the wrong table. The fixture types and loader belong to `sub-harness-fake`, not the `sub-sdk` kernel.
 
 ## Rationale
 

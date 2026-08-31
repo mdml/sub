@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::super::error::AcpError;
+use crate::FakeHarnessError;
 
 /// Parsed scenario manifest (`*.scenario.toml`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +39,8 @@ pub enum ScenarioBehavior {
     },
     /// Honor `session/cancel` and return `cancelled`.
     CancelHonored,
+    /// Ask the client to authorize a tool call before replaying the fixture.
+    PermissionRequest,
 }
 
 impl Scenario {
@@ -46,10 +48,10 @@ impl Scenario {
     ///
     /// # Errors
     ///
-    /// Returns [`AcpError`] when the file cannot be read or parsed.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, AcpError> {
-        let text = fs::read_to_string(path.as_ref()).map_err(AcpError::Io)?;
-        toml::from_str(&text).map_err(AcpError::serialization)
+    /// Returns [`FakeHarnessError`] when the file cannot be read or parsed.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, FakeHarnessError> {
+        let text = fs::read_to_string(path.as_ref()).map_err(FakeHarnessError::Io)?;
+        toml::from_str(&text).map_err(FakeHarnessError::serialization)
     }
 
     /// Resolve the fixture directory from a scenarios root and fixtures root.
@@ -76,7 +78,7 @@ mod tests {
         let Err(error) = Scenario::load("/nonexistent/scenario.toml") else {
             panic!("expected io error");
         };
-        assert!(matches!(error, AcpError::Io(_)));
+        assert!(matches!(error, FakeHarnessError::Io(_)));
     }
 
     #[test]
@@ -87,5 +89,17 @@ mod tests {
         };
         let dir = scenario.fixture_dir("/fixtures");
         assert_eq!(dir, PathBuf::from("/fixtures/minimal"));
+    }
+
+    #[test]
+    fn invalid_scenario_errors() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let path = dir.path().join("invalid.scenario.toml");
+        std::fs::write(&path, "fixture = [not valid")
+            .unwrap_or_else(|error| panic!("write scenario: {error}"));
+        let Err(error) = Scenario::load(path) else {
+            panic!("expected serialization error");
+        };
+        assert!(matches!(error, FakeHarnessError::Serialization(_)));
     }
 }

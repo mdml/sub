@@ -25,19 +25,11 @@ pub enum AcpError {
     /// I/O or spawn failure talking to the agent process.
     #[error("agent I/O error: {0}")]
     Io(#[from] std::io::Error),
-
-    /// JSON serialization or fixture parsing failed.
-    #[error("serialization error: {0}")]
-    Serialization(String),
 }
 
 impl AcpError {
     pub(crate) fn protocol(error: &agent_client_protocol::Error) -> Self {
         Self::Protocol(error.to_string())
-    }
-
-    pub(crate) fn serialization(error: impl std::fmt::Display) -> Self {
-        Self::Serialization(error.to_string())
     }
 }
 
@@ -49,7 +41,5 @@ mod tests {
     fn display_includes_context() {
         let error = AcpError::TimedOut(Duration::from_secs(1));
         assert!(error.to_string().contains("timed out"));
-        let error = AcpError::serialization("bad toml");
-        assert!(error.to_string().contains("bad toml"));
     }
 }

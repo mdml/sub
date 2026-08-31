@@ -43,11 +43,22 @@ pub enum StreamUpdateKind {
     AvailableCommandsUpdate,
     /// A plan update.
     Plan,
+    /// A harness permission request denied by `sub`.
+    PermissionDenied,
     /// Any other or unrecognized update variant.
     Other,
 }
 
 impl StreamUpdate {
+    pub(crate) fn permission_denied(
+        request: &agent_client_protocol::schema::v1::RequestPermissionRequest,
+    ) -> Self {
+        Self {
+            kind: StreamUpdateKind::PermissionDenied,
+            text: request.tool_call.fields.title.clone(),
+        }
+    }
+
     pub(crate) fn from_session_update(
         update: &agent_client_protocol::schema::v1::SessionUpdate,
     ) -> Self {
@@ -97,13 +108,15 @@ impl StreamUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::SessionUpdate;
+    use agent_client_protocol::schema::v1::{
+        ContentBlock, ContentChunk, ImageContent, Plan, SessionUpdate,
+    };
 
     #[test]
     fn maps_fixture_session_update() {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../sub-harness-fake/fixtures/minimal");
-        let fixture = crate::acp::replay::LoadedFixture::load(dir)
+        let fixture = sub_harness_fake::LoadedFixture::load(dir)
             .unwrap_or_else(|error| panic!("fixture: {error}"));
         let event = fixture
             .events
@@ -130,7 +143,7 @@ mod tests {
     fn maps_codex_tool_and_usage_updates() {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../sub-harness-fake/fixtures/codex-hello");
-        let fixture = crate::acp::replay::LoadedFixture::load(dir)
+        let fixture = sub_harness_fake::LoadedFixture::load(dir)
             .unwrap_or_else(|error| panic!("fixture: {error}"));
 
         let mut saw_tool = false;
@@ -160,5 +173,28 @@ mod tests {
         }
         assert!(saw_tool, "codex fixture should include tool call updates");
         assert!(saw_usage, "codex fixture should include usage updates");
+    }
+
+    #[test]
+    fn maps_plan_and_other_updates() {
+        let plan = StreamUpdate::from_session_update(&SessionUpdate::Plan(Plan::new(Vec::new())));
+        assert_eq!(plan.kind, StreamUpdateKind::Plan);
+        assert!(plan.text.is_none());
+
+        let other = StreamUpdate::from_session_update(&SessionUpdate::UserMessageChunk(
+            ContentChunk::new("user input".into()),
+        ));
+        assert_eq!(other.kind, StreamUpdateKind::Other);
+        assert!(other.text.is_none());
+    }
+
+    #[test]
+    fn non_text_message_chunk_has_no_text() {
+        let update = SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Image(
+            ImageContent::new("aW1hZ2U=", "image/png"),
+        )));
+        let mapped = StreamUpdate::from_session_update(&update);
+        assert_eq!(mapped.kind, StreamUpdateKind::AgentMessageChunk);
+        assert!(mapped.text.is_none());
     }
 }

@@ -1174,8 +1174,14 @@ dependencies = [
 name = "sub-harness-fake"
 version = "0.0.0"
 dependencies = [
+ "agent-client-protocol",
+ "serde",
+ "serde_json",
  "sub-sdk",
+ "tempfile",
+ "thiserror",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -1198,7 +1204,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml",
 ]
 
 [[package]]
