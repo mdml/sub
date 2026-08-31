@@ -5,6 +5,6 @@ Two nightly jobs run on the owner's machine, not on GitHub, because they need th
 | Job | Definition | Script | Needs |
 |:--|:--|:--|:--|
 | Harness compatibility | [`harness-compatibility.md`](harness-compatibility.md) | `scripts/nightly/harness-compatibility.sh` | Installed `claude`, `codex`, `cursor-agent`; the contract suite (next item in the mental model's "Next for agents"). |
-| Mental-model audit | [`mental-model-audit.md`](mental-model-audit.md) | `scripts/nightly/mental-model-audit.sh` | A harness with the `sub-mental-model` skill. |
+| Mental-model audit | [`mental-model-audit.md`](mental-model-audit.md) | `scripts/nightly/mental-model-audit.sh` | `claude`, `jq`, the `sub-mental-model` skill, and the authenticated Dogtag account connector. |
 
 The GitHub nightly (`.github/workflows/nightly.yml`) is separate and covers vulnerability and dependency-freshness checks.

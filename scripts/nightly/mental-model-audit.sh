@@ -1,30 +1,104 @@
 #!/usr/bin/env sh
 # On-machine nightly: mental-model audit. Definition: docs/nightlies/mental-model-audit.md
-# Usage: scripts/nightly/mental-model-audit.sh [claude|codex|cursor-agent]
+# Usage: scripts/nightly/mental-model-audit.sh
 # Schedule this from the owner's scheduler; it is not run on GitHub.
 set -eu
-cd "$(dirname "$0")/../.."
-
-HARNESS="${1:-claude}"
+umask 077
+REPO_ROOT="$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)"
 REPORT_DIR="${SUB_AUDIT_REPORT_DIR:-$HOME/.local/state/sub-audit}"
-PROMPT="Audit this repository against the sub mental model. Invoke the sub-mental-model skill and read the mental model in full. Then read AGENTS.md, docs/, and every Cargo.toml. Report, with file and line references: (a) repository statements that contradict the mental model; (b) decisions the repository has frozen that the mental model reserves for the owner; (c) mental-model claims that repository evidence (spikes, tests) now contradicts. Never edit the mental model. Do not modify the repository or open a pull request. Write the report as Markdown to a file named by today's date under $REPORT_DIR (create the directory if needed). End your final message with exactly FINDINGS: yes if (a), (b), or (c) is non-empty, otherwise FINDINGS: no."
+PROMPT='Run the deliberate nightly mental-model audit for `sub`.
+
+Invoke the `sub-mental-model` skill for its operating rules. Read the human-owned mental model itself in full only through the Dogtag MCP `show` tool for `2026-08-24_note_sub-mental-model` in the `documents` layer; do not read the vault checkout from disk. If the Dogtag connector is still connecting, wait up to 30 seconds and retry. If it remains unavailable, report the audit as blocked instead of falling back to another copy.
+
+Inspect the repository canonical product, model, architecture, decision, and current-work documents, plus the manifests, source, and tests needed to evaluate the current phase. Treat resolved spike reports as historical evidence, not current decisions, and do not treat derived notes as co-equal sources of truth.
+
+Report only material discrepancies in these four classes:
+
+1. Missing from my model — an important repository concept or relationship required by current work that the mental model does not contain.
+2. Contradicted by the repository — a mental-model claim that the maintained repository no longer supports.
+3. Unrepresented decision — a consequential implemented product, domain, data-shape, public-interface, abstraction-boundary, or difficult-to-reverse decision absent from the mental model.
+4. Vocabulary mismatch — the same term or relationship means something materially different in the mental model and repository.
+
+For each discrepancy, state the repository evidence with file and line references, why the gap matters to current work, and the smallest decision the owner needs to make. Translate technical questions into the mental-model vocabulary. Do not prescribe an owner-reserved decision. If a class has no discrepancies, say none.
+
+Do not modify the mental model or repository, create commits or pull requests, or delegate to subagents. Return the complete report as Markdown in the final response. End with exactly `FINDINGS: yes` when any of the four classes is non-empty, `FINDINGS: no` when all are empty, or `AUDIT: blocked` when the required source or evidence is unavailable.'
 
 if [ "${SUB_AUDIT_ENABLED:-0}" != "1" ]; then
-    echo "mental-model-audit: disabled. Would run '$HARNESS' in auto mode with this prompt:" >&2
+    echo "mental-model-audit: disabled. Would run 'claude' in auto mode with this prompt:" >&2
     printf '\n%s\n\n' "$PROMPT" >&2
     echo "mental-model-audit: set SUB_AUDIT_ENABLED=1 to enable." >&2
     exit 1
 fi
 
 mkdir -p "$REPORT_DIR"
-case "$HARNESS" in
-    claude) out="$(claude --permission-mode auto -p "$PROMPT")" ;;
-    codex) out="$(codex exec --full-auto "$PROMPT")" ;;
-    cursor-agent) out="$(cursor-agent -p --force "$PROMPT")" ;;
-    *) echo "mental-model-audit: unknown harness '$HARNESS'" >&2; exit 2 ;;
-esac
-printf '%s\n' "$out"
-echo "mental-model-audit: reports are under $REPORT_DIR"
+command -v claude >/dev/null 2>&1 || {
+    echo "mental-model-audit: claude is not on PATH" >&2
+    exit 2
+}
+command -v jq >/dev/null 2>&1 || {
+    echo "mental-model-audit: jq is not on PATH" >&2
+    exit 2
+}
+
+AUDIT_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/sub-mental-model-audit.XXXXXX")"
+AUDIT_WORKTREE="$AUDIT_PARENT/worktree"
+cleanup() {
+    git -C "$REPO_ROOT" worktree remove --force "$AUDIT_WORKTREE" >/dev/null 2>&1 || true
+    rmdir "$AUDIT_PARENT" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT HUP INT TERM
+
+git -C "$REPO_ROOT" worktree add --detach "$AUDIT_WORKTREE" staging >/dev/null
+COMMIT="$(git -C "$AUDIT_WORKTREE" rev-parse HEAD)"
+STARTED_AT="$(date --iso-8601=seconds)"
+
+set +e
+RAW="$(cd "$AUDIT_WORKTREE" && claude --permission-mode auto --disallowedTools "Write,Edit,NotebookEdit" --output-format json -p "$PROMPT")"
+CLAUDE_STATUS=$?
+set -e
+
+ENDED_AT="$(date --iso-8601=seconds)"
+REPORT_PATH="$REPORT_DIR/$(date +%F).md"
+
+if ! printf '%s' "$RAW" | jq -e '.type == "result"' >/dev/null 2>&1; then
+    {
+        printf '# `sub` mental-model audit — %s\n\n' "$(date +%F)"
+        printf -- '- Repository commit: `%s`\n' "$COMMIT"
+        printf -- '- Started: %s\n' "$STARTED_AT"
+        printf -- '- Finished: %s\n' "$ENDED_AT"
+        printf -- '- Claude exit status: %s\n\n' "$CLAUDE_STATUS"
+        printf 'The Claude runner did not return a result envelope.\n\n'
+        printf '```text\n%s\n```\n\nAUDIT: blocked\n' "$RAW"
+    } >"$REPORT_PATH"
+    printf '%s\n' "mental-model-audit: blocked; report: $REPORT_PATH" >&2
+    exit 2
+fi
+
+RESULT="$(printf '%s' "$RAW" | jq -r '.result // ""')"
+DURATION_MS="$(printf '%s' "$RAW" | jq -r '.duration_ms // "unknown"')"
+COST_USD="$(printf '%s' "$RAW" | jq -r 'if .total_cost_usd == null then "unknown" else ((.total_cost_usd * 1000000 | round) / 1000000 | tostring) end')"
+SESSION_ID="$(printf '%s' "$RAW" | jq -r '.session_id // "unknown"')"
+
+{
+    printf '# `sub` mental-model audit — %s\n\n' "$(date +%F)"
+    printf -- '- Repository commit: `%s`\n' "$COMMIT"
+    printf -- '- Started: %s\n' "$STARTED_AT"
+    printf -- '- Finished: %s\n' "$ENDED_AT"
+    printf -- '- Agent duration: %s ms\n' "$DURATION_MS"
+    printf -- '- Agent cost: USD %s\n' "$COST_USD"
+    printf -- '- Harness session: `%s`\n' "$SESSION_ID"
+    printf -- '- Owner review duration: pending\n'
+    printf -- '- False positives: pending owner review\n\n'
+    printf '%s\n' "$RESULT"
+} >"$REPORT_PATH"
+
+printf '%s\n' "$RESULT"
+printf '%s\n' "mental-model-audit: report: $REPORT_PATH"
+
+if [ "$CLAUDE_STATUS" -ne 0 ] || printf '%s' "$RESULT" | grep -q 'AUDIT: blocked'; then
+    exit 2
+fi
 # Exit non-zero on findings so the scheduler surfaces them.
-printf '%s' "$out" | grep -q 'FINDINGS: yes' && exit 1
+printf '%s' "$RESULT" | grep -q 'FINDINGS: yes' && exit 1
+printf '%s' "$RESULT" | grep -q 'FINDINGS: no' || exit 2
 exit 0
