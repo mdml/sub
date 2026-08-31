@@ -1,0 +1,3 @@
+fixture = "minimal"
+behavior = "malformed"
+after_events = 1

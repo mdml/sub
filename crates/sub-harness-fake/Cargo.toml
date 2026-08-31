@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
+[[bin]]
+name = "sub-harness-fake"
+path = "src/main.rs"
+
 [dependencies]
 sub-sdk.workspace = true
 tokio.workspace = true

@@ -1,0 +1,2 @@
+fixture = "minimal-cancelled"
+behavior = "replay"
