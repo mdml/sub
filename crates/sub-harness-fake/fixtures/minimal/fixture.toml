@@ -1,0 +1,16 @@
+events = "events.jsonl"
+
+[source]
+kind = "synthetic"
+
+[agent]
+name = "sub-harness-fake"
+title = "Fake harness"
+version = "0.0.0"
+
+[session]
+session_id = "00000000-0000-0000-0000-000000000001"
+
+[prompt]
+stop_reason = "end_turn"
+replay_timing = false

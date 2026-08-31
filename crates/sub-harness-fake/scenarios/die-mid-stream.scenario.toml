@@ -1,0 +1,3 @@
+fixture = "minimal"
+behavior = "die_mid_stream"
+after_events = 1

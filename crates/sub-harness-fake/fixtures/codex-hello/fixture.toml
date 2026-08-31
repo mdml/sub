@@ -1,0 +1,18 @@
+events = "events.jsonl"
+
+[source]
+kind = "recorded"
+harness = "@agentclientprotocol/codex-acp"
+version = "1.6.2"
+
+[agent]
+name = "@agentclientprotocol/codex-acp"
+title = "Codex"
+version = "1.6.2"
+
+[session]
+session_id = "01a0409f-ada4-76c2-8c7a-68ef4d888a3b"
+
+[prompt]
+stop_reason = "end_turn"
+replay_timing = false
