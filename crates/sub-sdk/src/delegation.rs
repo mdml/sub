@@ -1551,6 +1551,39 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn wait_returns_orphaned_without_timing_out() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_232323232323232323232323".to_owned(),
+        };
+        let paths = TaskPaths::new(root.path(), &handle);
+        fs::create_dir_all(&paths.attempt).unwrap_or_else(|error| panic!("mkdir: {error}"));
+        write_json(
+            &paths.state,
+            &ExecutionAttempt {
+                number: 1,
+                status: TaskStatus::Running,
+                supervisor_pid: Some(u32::MAX),
+                supervisor_start_time: Some(1),
+                harness_session_id: Some("fixture-session".to_owned()),
+                usage: UsageTotals::default(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("state: {error}"));
+
+        let outcome = Delegator::new(root.path(), "/does/not/run")
+            .wait(&handle, Duration::from_mins(1))
+            .await
+            .unwrap_or_else(|error| panic!("wait: {error}"));
+        assert_eq!(
+            outcome,
+            WaitOutcome::Orphaned {
+                status: TaskStatus::Orphaned
+            }
+        );
+    }
+
     #[test]
     fn inspect_reports_dead_running_supervisor_as_orphaned() {
         let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
@@ -1638,6 +1671,28 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event.kind, TaskEventKind::AttemptOrphaned))
         );
+        let error = Delegator::new(root.path(), "/bin/true")
+            .recover(&handle)
+            .err()
+            .unwrap_or_else(|| panic!("queued attempt must not be recoverable"));
+        assert!(matches!(error, DelegationError::NotOrphaned(_)));
+    }
+
+    #[test]
+    fn empty_list_and_unknown_inspect_are_explicit() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let delegator = Delegator::new(root.path(), "/does/not/run");
+        let listed = delegator
+            .list()
+            .unwrap_or_else(|error| panic!("list: {error}"));
+        assert!(listed.tasks.is_empty());
+        let error = delegator
+            .inspect(&TaskHandle {
+                id: "tsk_343434343434343434343434".to_owned(),
+            })
+            .err()
+            .unwrap_or_else(|| panic!("inspect should reject unknown task"));
+        assert!(matches!(error, DelegationError::UnknownHandle(_)));
     }
 
     #[test]
@@ -1772,6 +1827,39 @@ mod tests {
             event.kind,
             TaskEventKind::AttemptResumeFailed {
                 reason: ResumeFailureReason::HarnessRefused
+            }
+        )));
+    }
+
+    #[tokio::test]
+    async fn supervisor_records_harness_cancellation() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_454545454545454545454545".to_owned(),
+        };
+        let paths = prepare_supervisor(
+            root.path(),
+            &handle,
+            &fake_request(root.path(), "cancel_honored"),
+        );
+
+        run_supervisor(root.path(), &handle, 1)
+            .await
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+
+        let result: TaskResult =
+            read_json(&paths.result).unwrap_or_else(|error| panic!("result: {error}"));
+        assert_eq!(result.status, TaskStatus::Cancelled);
+        let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.kind, TaskEventKind::AttemptCancelled))
+        );
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            TaskEventKind::AttemptFinished {
+                status: TaskStatus::Cancelled
             }
         )));
     }

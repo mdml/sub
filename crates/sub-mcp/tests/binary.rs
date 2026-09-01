@@ -4,6 +4,57 @@ use std::io::Write;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
+fn prepare_orphaned_task(root: &std::path::Path, handle: &str) {
+    let attempt = root.join("tasks").join(handle).join("attempts/1");
+    std::fs::create_dir_all(&attempt).unwrap_or_else(|error| panic!("mkdir: {error}"));
+    let params = serde_json::json!({
+        "harness": "codex",
+        "prompt": "resume the bounded probe",
+        "cwd": root,
+        "harness_binary": "/bin/true",
+        "model": null,
+        "permission_mode": "agent"
+    });
+    let state = serde_json::json!({
+        "number": 1,
+        "status": "running",
+        "supervisor_pid": u32::MAX,
+        "supervisor_start_time": 1,
+        "harness_session_id": "fixture-session",
+        "usage": {"cost": null, "tokens": null}
+    });
+    std::fs::write(
+        attempt.join("state.json"),
+        serde_json::to_vec(&state).unwrap_or_else(|error| panic!("state json: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("state: {error}"));
+    std::fs::write(
+        root.join("tasks").join(handle).join("task.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "handle": {"id": handle},
+            "params": params,
+            "attempt": state
+        }))
+        .unwrap_or_else(|error| panic!("task json: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("task: {error}"));
+    std::fs::write(
+        attempt.join("request.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "params": params,
+            "adapter": {
+                "bridge": {"command": "/bin/false", "args": [], "env": {}},
+                "session_meta": {},
+                "delegation_guard": "Do not use subagents.",
+                "resume_mechanism": "resume"
+            },
+            "resume_session_id": null
+        }))
+        .unwrap_or_else(|error| panic!("request json: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("request: {error}"));
+}
+
 #[test]
 fn prints_version() {
     let output = Command::new(env!("CARGO_BIN_EXE_sub-mcp"))
@@ -47,6 +98,73 @@ fn supervisor_mode_rejects_missing_handle() {
         .unwrap_or_else(|error| panic!("run: {error}"));
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("handle missing"));
+}
+
+#[cfg(unix)]
+#[test]
+fn recover_and_orphaned_wait_match_the_cli_over_stdio() {
+    let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let handle = "tsk_565656565656565656565656";
+    prepare_orphaned_task(root.path(), handle);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_sub-mcp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("spawn: {error}"));
+    let mut stdin = child.stdin.take().unwrap_or_else(|| panic!("stdin"));
+    let mut stdout = BufReader::new(child.stdout.take().unwrap_or_else(|| panic!("stdout")));
+    let state = root.path().to_string_lossy();
+
+    writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sub_wait","arguments":{"handle":handle,"timeout_seconds":0,"state_dir":state}}})).unwrap_or_else(|error| panic!("write: {error}"));
+    stdin
+        .flush()
+        .unwrap_or_else(|error| panic!("flush: {error}"));
+    let mut line = String::new();
+    stdout
+        .read_line(&mut line)
+        .unwrap_or_else(|error| panic!("read: {error}"));
+    let waited: serde_json::Value =
+        serde_json::from_str(&line).unwrap_or_else(|error| panic!("wait json: {error}"));
+    assert_eq!(waited["result"]["structuredContent"]["state"], "orphaned");
+
+    line.clear();
+    writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sub_recover","arguments":{"handle":handle,"state_dir":state}}})).unwrap_or_else(|error| panic!("write: {error}"));
+    stdin
+        .flush()
+        .unwrap_or_else(|error| panic!("flush: {error}"));
+    stdout
+        .read_line(&mut line)
+        .unwrap_or_else(|error| panic!("read: {error}"));
+    let recovered: serde_json::Value =
+        serde_json::from_str(&line).unwrap_or_else(|error| panic!("recover json: {error}"));
+    assert_eq!(
+        recovered["result"]["structuredContent"]["handle"]["id"],
+        handle
+    );
+    assert_eq!(recovered["result"]["structuredContent"]["attempt"], 2);
+
+    line.clear();
+    writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sub_wait","arguments":{"handle":handle,"timeout_seconds":3,"state_dir":state}}})).unwrap_or_else(|error| panic!("write: {error}"));
+    stdin
+        .flush()
+        .unwrap_or_else(|error| panic!("flush: {error}"));
+    stdout
+        .read_line(&mut line)
+        .unwrap_or_else(|error| panic!("read: {error}"));
+    let complete: serde_json::Value =
+        serde_json::from_str(&line).unwrap_or_else(|error| panic!("complete json: {error}"));
+    assert_eq!(complete["result"]["structuredContent"]["state"], "complete");
+    assert_eq!(
+        complete["result"]["structuredContent"]["result"]["status"],
+        "failed"
+    );
+    drop(stdin);
+    assert!(
+        child
+            .wait()
+            .unwrap_or_else(|error| panic!("wait: {error}"))
+            .success()
+    );
 }
 
 #[cfg(unix)]

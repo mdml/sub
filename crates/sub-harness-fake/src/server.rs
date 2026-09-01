@@ -65,16 +65,9 @@ pub async fn run_stdio(
                 async move |request: ResumeSessionRequest,
                             responder: Responder<ResumeSessionResponse>,
                             _connection: ConnectionTo<Client>| {
-                    if matches!(state.behavior, ScenarioBehavior::ResumeRefused)
-                        || request.session_id.0.as_ref()
-                            != state.fixture.manifest.session.session_id
-                    {
-                        responder.respond_with_error(
-                            agent_client_protocol::Error::invalid_params()
-                                .data("fixture session unavailable"),
-                        )
-                    } else {
-                        responder.respond(ResumeSessionResponse::new())
+                    match state.resume_session(&request) {
+                        Ok(response) => responder.respond(response),
+                        Err(error) => responder.respond_with_error(error),
                     }
                 }
             },
@@ -86,7 +79,15 @@ pub async fn run_stdio(
                 async move |request: LoadSessionRequest,
                             responder: Responder<LoadSessionResponse>,
                             connection: ConnectionTo<Client>| {
-                    state.load_session(&request, responder, &connection)
+                    match state.load_session(&request) {
+                        Ok(updates) => {
+                            for update in updates {
+                                connection.send_notification(update)?;
+                            }
+                            responder.respond(LoadSessionResponse::new())
+                        }
+                        Err(error) => responder.respond_with_error(error),
+                    }
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -196,29 +197,54 @@ impl SharedState {
         }
     }
 
+    fn session_available(&self, session_id: &agent_client_protocol::schema::v1::SessionId) -> bool {
+        !matches!(self.behavior, ScenarioBehavior::ResumeRefused)
+            && session_id.0.as_ref() == self.fixture.manifest.session.session_id
+    }
+
+    fn resume_session(
+        &self,
+        request: &ResumeSessionRequest,
+    ) -> Result<ResumeSessionResponse, agent_client_protocol::Error> {
+        if self.session_available(&request.session_id) {
+            Ok(ResumeSessionResponse::new())
+        } else {
+            Err(session_unavailable())
+        }
+    }
+
     fn load_session(
         &self,
         request: &LoadSessionRequest,
-        responder: Responder<LoadSessionResponse>,
-        connection: &ConnectionTo<Client>,
-    ) -> Result<(), agent_client_protocol::Error> {
-        if matches!(self.behavior, ScenarioBehavior::ResumeRefused)
-            || request.session_id.0.as_ref() != self.fixture.manifest.session.session_id
-        {
-            return responder.respond_with_error(
-                agent_client_protocol::Error::invalid_params().data("fixture session unavailable"),
-            );
+    ) -> Result<Vec<SessionNotification>, agent_client_protocol::Error> {
+        if !self.session_available(&request.session_id) {
+            return Err(session_unavailable());
         }
-        for event in &self.fixture.events {
-            if event.kind == "session/update"
-                && let Some(value) = &event.notification
-            {
-                connection.send_notification(parse_notification(value)?)?;
-            }
-        }
-        responder.respond(LoadSessionResponse::new())
+        self.fixture
+            .events
+            .iter()
+            .filter(|event| event.kind == "session/update")
+            .filter_map(|event| event.notification.as_ref())
+            .map(parse_notification)
+            .collect()
     }
 
+    fn prompt_response(&self) -> PromptResponse {
+        let mut response = PromptResponse::new(self.stop_reason());
+        if let Some(usage) = &self.fixture.manifest.prompt.usage {
+            response = response.usage(
+                agent_client_protocol::schema::v1::Usage::new(
+                    usage.total_tokens,
+                    usage.input_tokens,
+                    usage.output_tokens,
+                )
+                .thought_tokens(usage.thought_tokens)
+                .cached_read_tokens(usage.cached_read_tokens)
+                .cached_write_tokens(usage.cached_write_tokens),
+            );
+        }
+        response
+    }
     fn request_permission(
         request: PromptRequest,
         responder: Responder<PromptResponse>,
@@ -281,20 +307,7 @@ impl SharedState {
             }
         }
 
-        let mut response = PromptResponse::new(self.stop_reason());
-        if let Some(usage) = &self.fixture.manifest.prompt.usage {
-            response = response.usage(
-                agent_client_protocol::schema::v1::Usage::new(
-                    usage.total_tokens,
-                    usage.input_tokens,
-                    usage.output_tokens,
-                )
-                .thought_tokens(usage.thought_tokens)
-                .cached_read_tokens(usage.cached_read_tokens)
-                .cached_write_tokens(usage.cached_write_tokens),
-            );
-        }
-        responder.respond(response)
+        responder.respond(self.prompt_response())
     }
 
     fn stop_reason(&self) -> StopReason {
@@ -306,6 +319,10 @@ impl SharedState {
             map_stop_reason(self.fixture.manifest.prompt.stop_reason)
         }
     }
+}
+
+fn session_unavailable() -> agent_client_protocol::Error {
+    agent_client_protocol::Error::invalid_params().data("fixture session unavailable")
 }
 
 fn permission_request(
@@ -371,6 +388,12 @@ mod tests {
         LoadedFixture::load(dir).unwrap_or_else(|error| panic!("fixture: {error}"))
     }
 
+    fn codex_fixture() -> LoadedFixture {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../sub-harness-fake/fixtures/codex-hello");
+        LoadedFixture::load(dir).unwrap_or_else(|error| panic!("fixture: {error}"))
+    }
+
     fn shared_state(behavior: ScenarioBehavior) -> Arc<SharedState> {
         Arc::new(SharedState {
             behavior,
@@ -417,6 +440,62 @@ mod tests {
             response.session_id.0.as_ref(),
             state.fixture.manifest.session.session_id
         );
+    }
+
+    #[test]
+    fn resume_accepts_only_the_recorded_available_session() {
+        let state = shared_state(ScenarioBehavior::Replay);
+        let session_id = state.fixture.manifest.session.session_id.clone();
+        let accepted = ResumeSessionRequest::new(session_id, "/tmp");
+        assert!(state.resume_session(&accepted).is_ok());
+
+        let missing = ResumeSessionRequest::new("missing-session", "/tmp");
+        assert!(state.resume_session(&missing).is_err());
+
+        let refused = shared_state(ScenarioBehavior::ResumeRefused);
+        let recorded =
+            ResumeSessionRequest::new(refused.fixture.manifest.session.session_id.clone(), "/tmp");
+        assert!(refused.resume_session(&recorded).is_err());
+    }
+
+    #[test]
+    fn load_returns_the_recorded_replay_updates_or_refuses() {
+        let state = shared_state(ScenarioBehavior::Replay);
+        let request =
+            LoadSessionRequest::new(state.fixture.manifest.session.session_id.clone(), "/tmp");
+        let updates = state
+            .load_session(&request)
+            .unwrap_or_else(|error| panic!("load: {error}"));
+        let expected = state
+            .fixture
+            .events
+            .iter()
+            .filter(|event| event.kind == "session/update" && event.notification.is_some())
+            .count();
+        assert_eq!(updates.len(), expected);
+        assert!(!updates.is_empty());
+
+        let missing = LoadSessionRequest::new("missing-session", "/tmp");
+        assert!(state.load_session(&missing).is_err());
+    }
+
+    #[test]
+    fn prompt_response_preserves_fixture_usage_support() {
+        let minimal = shared_state(ScenarioBehavior::Replay);
+        assert!(minimal.prompt_response().usage.is_none());
+
+        let codex = SharedState {
+            behavior: ScenarioBehavior::Replay,
+            fixture: codex_fixture(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        let usage = codex
+            .prompt_response()
+            .usage
+            .unwrap_or_else(|| panic!("codex usage"));
+        assert_eq!(usage.total_tokens, 16_749);
+        assert_eq!(usage.input_tokens, 1_410);
+        assert_eq!(usage.output_tokens, 235);
     }
 
     #[test]
