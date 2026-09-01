@@ -1,6 +1,6 @@
 # GitHub nightly: vulnerability and dependency-freshness checks.
-# The on-machine nightlies (harness compatibility, mental-model audit) are
-# documented under docs/nightlies/ and are not run here.
+# The on-machine harness-compatibility nightly is documented under docs/nightlies/
+# and is not run here. The mental-model audit runs outside this repository.
 name: nightly
 
 on:

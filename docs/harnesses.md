@@ -14,7 +14,7 @@ Reaches every harness as the user-level `sub-mental-model` skill, maintained out
 
 | Harness | File | Content |
 |:--|:--|:--|
-| `claude` | `.claude/settings.json` | Permission allow-list for the verification commands (`scripts/verify.sh`, `just`, `cargo`, read-only `git` and `gh`). |
+| `claude` | `.claude/settings.json` | Permission allow-list for the verification commands (`scripts/verify.sh`, `just`, `cargo`) and the worktree-and-PR workflow (`git add`/`commit`/`push`, `gh pr create`/`view`/`checks`). |
 | `codex` | `.codex/config.toml` | Project-scoped config. Currently only a comment; present so project-level overrides have one place. |
 | `cursor-agent` | `.cursor/cli.json` | Permission allow-list equivalent to the `claude` one. |
 
