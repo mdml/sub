@@ -1,0 +1,17 @@
+{
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": { "name": "sub_inspect", "arguments": { "handle": "$HANDLE", "state_dir": "$STATE_DIR" } }
+  },
+  "structuredContent": {
+    "task": { "handle": { "id": "$HANDLE" }, "harness": "codex", "status": "succeeded" },
+    "attempts": [
+      { "number": 1, "status": "orphaned", "harness_session_id": "01a05df9-674a-7812-9987-f848b527aa65" },
+      { "number": 2, "status": "succeeded", "harness_session_id": "01a05df9-674a-7812-9987-f848b527aa65" }
+    ],
+    "lifecycle_events": ["attempt_orphaned", "attempt_resumed", "usage_accumulated", "attempt_finished"]
+  },
+  "isError": false
+}

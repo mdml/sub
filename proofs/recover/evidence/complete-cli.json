@@ -1,0 +1,43 @@
+{
+  "command": "sub inspect $HANDLE --state-dir $STATE_DIR",
+  "task": {
+    "handle": { "id": "$HANDLE" },
+    "harness": "codex",
+    "status": "succeeded",
+    "usage_support": { "cost": false, "tokens": true },
+    "usage": {
+      "cost": null,
+      "tokens": { "total_tokens": 16775, "input_tokens": 616, "output_tokens": 31, "thought_tokens": 0, "cached_read_tokens": 16128, "cached_write_tokens": null }
+    }
+  },
+  "attempts": [
+    {
+      "number": 1,
+      "status": "orphaned",
+      "harness_session_id": "01a05df9-674a-7812-9987-f848b527aa65",
+      "usage": { "cost": null, "tokens": null }
+    },
+    {
+      "number": 2,
+      "status": "succeeded",
+      "harness_session_id": "01a05df9-674a-7812-9987-f848b527aa65",
+      "usage": {
+        "cost": null,
+        "tokens": { "total_tokens": 16775, "input_tokens": 616, "output_tokens": 31, "thought_tokens": 0, "cached_read_tokens": 16128, "cached_write_tokens": null }
+      }
+    }
+  ],
+  "lifecycle_events": [
+    { "attempt": 1, "kind": "attempt_started" },
+    { "attempt": 1, "kind": "attempt_orphaned" },
+    { "attempt": 2, "kind": "attempt_started" },
+    { "attempt": 2, "kind": "attempt_resumed" },
+    {
+      "attempt": 2,
+      "kind": "usage_accumulated",
+      "attempt_usage": { "tokens": { "total_tokens": 16775 } },
+      "task_usage": { "tokens": { "total_tokens": 16775 } }
+    },
+    { "attempt": 2, "kind": "attempt_finished", "status": "succeeded" }
+  ]
+}

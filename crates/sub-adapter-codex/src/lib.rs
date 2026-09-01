@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use sub_sdk::acp::HarnessLaunch;
 use sub_sdk::bridge::{self, BridgeError, BridgeSpec};
+use sub_sdk::delegation::ResumeMechanism;
 
 /// Harness name this adapter supports.
 pub const HARNESS_NAME: &str = "codex";
@@ -12,6 +13,8 @@ pub const BRIDGE_PACKAGE: &str = "@agentclientprotocol/codex-acp";
 pub const BRIDGE_VERSION: &str = "1.6.2";
 /// Codex versions exercised by the real-harness contract suite.
 pub const VERIFIED_HARNESS_VERSIONS: &[&str] = &["0.149.1", "0.151.0"];
+/// Codex's bridge reopens an existing session through ACP `session/resume`.
+pub const RESUME_MECHANISM: ResumeMechanism = ResumeMechanism::Resume;
 /// Bridge installation identity.
 pub const BRIDGE: BridgeSpec = BridgeSpec {
     package: BRIDGE_PACKAGE,

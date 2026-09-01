@@ -38,6 +38,14 @@ fn command_errors_are_actionable() {
     assert!(!unknown.status.success());
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown task handle"));
 
+    let recover = Command::new(binary)
+        .args(["recover", "tsk_000000000000000000000000", "--state-dir"])
+        .arg(root.path())
+        .output()
+        .unwrap_or_else(|error| panic!("run: {error}"));
+    assert!(!recover.status.success());
+    assert!(String::from_utf8_lossy(&recover.stderr).contains("unknown task handle"));
+
     let incomplete = Command::new(binary)
         .arg("launch")
         .output()

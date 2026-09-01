@@ -20,3 +20,5 @@ One file per repository-level decision, named `YYYY-MM-DD-<slug>.md`. Each state
 | 2026-08-31 | [Fake harness scenario scripting](2026-08-31-fake-harness-scenarios.md) |
 | 2026-08-31 | [Delegation kernel, durable handles, results, and adapter side channels](2026-08-31-delegation-kernel-and-adapters.md) |
 | 2026-09-01 | [Observe event vocabulary and usage accumulation](2026-09-01-observe-events-and-usage.md) |
+| 2026-09-01 | [Supervisor liveness and orphaned attempt status](2026-09-01-orphan-detection-and-status.md) |
+| 2026-09-01 | [Recovery attempts and bridge session resume](2026-09-01-recovery-resume-mechanics.md) |

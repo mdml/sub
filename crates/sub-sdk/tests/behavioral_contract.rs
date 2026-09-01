@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use common::harness::{ContractHarness, FakeScenario, real_harness_enabled};
 use sub_sdk::acp::{
-    AcpClient, AcpClientConfig, AcpError, HarnessLaunch, PromptOptions, StopReason,
+    AcpClient, AcpClientConfig, AcpError, HarnessLaunch, PromptOptions, SessionStart, StopReason,
     StreamUpdateKind,
 };
 use tempfile::TempDir;
@@ -208,6 +208,83 @@ async fn malformed_output() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn cross_process_resume_continues_the_same_session() {
+    let harness = ContractHarness::select(FakeScenario::ReplayMinimal);
+    let cwd = TempDir::new().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let (first, _) = client(harness.launch())
+        .prompt_turn(cwd.path(), PROMPT, PromptOptions::default())
+        .await
+        .unwrap_or_else(|error| panic!("initial turn: {error}"));
+    let (resumed, result) = client(harness.launch())
+        .prompt_turn(
+            cwd.path(),
+            "continue the contract probe",
+            PromptOptions {
+                timeout: Some(Duration::from_mins(2)),
+                session_start: SessionStart::Resume(first.session_id.clone()),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("resumed turn: {error}"));
+
+    assert_eq!(resumed.session_id, first.session_id);
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resume_refused_by_harness_is_an_error() {
+    if real_harness_enabled() {
+        return;
+    }
+    let harness = ContractHarness::select(FakeScenario::ResumeRefused);
+    let cwd = TempDir::new().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let error = client(harness.launch())
+        .prompt_turn(
+            cwd.path(),
+            "continue",
+            PromptOptions {
+                session_start: SessionStart::Resume("fixture-session".to_owned()),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("resume should fail"));
+    assert!(matches!(error, AcpError::Protocol(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn load_replays_session_updates_before_continuation() {
+    if real_harness_enabled() {
+        return;
+    }
+    let harness = ContractHarness::select(FakeScenario::ReplayMinimal);
+    let cwd = TempDir::new().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let (handle, _) = client(harness.launch())
+        .prompt_turn(cwd.path(), PROMPT, PromptOptions::default())
+        .await
+        .unwrap_or_else(|error| panic!("initial turn: {error}"));
+    let (_, result) = client(harness.launch())
+        .prompt_turn(
+            cwd.path(),
+            "continue",
+            PromptOptions {
+                session_start: SessionStart::Load(handle.session_id),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("loaded turn: {error}"));
+    let message_chunks = result
+        .updates
+        .iter()
+        .filter(|update| update.kind == StreamUpdateKind::AgentMessageChunk)
+        .count();
+    assert!(message_chunks >= 2, "load replay plus continuation stream");
+}
+
 /// Run the full contract suite against the harness selected by environment.
 ///
 /// Used by `scripts/nightly/harness-compatibility.sh` in real-harness mode.
@@ -219,17 +296,34 @@ async fn real_harness_mode_entrypoint() {
     }
 
     let harness = ContractHarness::select(FakeScenario::ReplayMinimal);
-    let (_handle, result) = prompt(
-        &harness,
-        PromptOptions {
-            timeout: Some(Duration::from_mins(2)),
-            ..PromptOptions::default()
-        },
-    )
-    .await
-    .unwrap_or_else(|error| panic!("real harness prompt turn: {error}"));
+    let cwd = TempDir::new().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let (handle, result) = client(harness.launch())
+        .prompt_turn(
+            cwd.path(),
+            PROMPT,
+            PromptOptions {
+                timeout: Some(Duration::from_mins(2)),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("real harness prompt turn: {error}"));
+    let (resumed, resumed_result) = client(harness.launch())
+        .prompt_turn(
+            cwd.path(),
+            "Continue the contract probe and reply briefly.",
+            PromptOptions {
+                timeout: Some(Duration::from_mins(2)),
+                session_start: SessionStart::Resume(handle.session_id.clone()),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("real harness resume turn: {error}"));
 
     assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert_eq!(resumed.session_id, handle.session_id);
+    assert_eq!(resumed_result.stop_reason, StopReason::EndTurn);
     match harness.real_name() {
         Some("claude") => {
             assert!(

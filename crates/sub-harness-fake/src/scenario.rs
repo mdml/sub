@@ -41,6 +41,8 @@ pub enum ScenarioBehavior {
     CancelHonored,
     /// Ask the client to authorize a tool call before replaying the fixture.
     PermissionRequest,
+    /// Reject `session/resume` to model a missing or refused native session.
+    ResumeRefused,
 }
 
 impl Scenario {

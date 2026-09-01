@@ -7,16 +7,17 @@ use std::time::Duration;
 use agent_client_protocol::Agent;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionModeRequest,
+    InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    ResumeSessionRequest, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionModeRequest,
 };
 use agent_client_protocol::{AcpAgent, Client, ConnectionTo};
 
 use super::config::AcpClientConfig;
 use super::error::AcpError;
 use super::launch::HarnessLaunch;
-use super::session::{PromptResult, SessionHandle};
+use super::session::{PromptResult, SessionHandle, SessionStart};
 use super::stop_reason::StopReason;
 use super::update::StreamUpdate;
 
@@ -33,10 +34,15 @@ pub struct PromptOptions {
     pub model: Option<String>,
     /// Bridge-specific `_meta` attached to `session/new`.
     pub session_meta: Option<serde_json::Value>,
+    /// Create, resume, or replay-load the harness session.
+    pub session_start: SessionStart,
 }
 
 /// Thread-safe callback invoked for each normalized stream update.
 pub type UpdateObserver = Arc<dyn Fn(StreamUpdate) + Send + Sync>;
+
+/// Thread-safe callback invoked as soon as the harness session is open.
+pub type SessionObserver = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Configuration for driving one ACP agent process.
 #[derive(Debug, Clone)]
@@ -78,7 +84,24 @@ impl AcpClient {
         options: PromptOptions,
         observer: Option<UpdateObserver>,
     ) -> Result<(SessionHandle, PromptResult), AcpError> {
-        let run = self.run_prompt_turn(cwd, prompt, &options, observer);
+        self.prompt_turn_observing_session(cwd, prompt, options, observer, None)
+            .await
+    }
+
+    /// Run one prompt turn and notify observers as the session opens and updates arrive.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AcpError`] when the agent process, negotiation, session open, or turn fails.
+    pub async fn prompt_turn_observing_session(
+        &self,
+        cwd: impl AsRef<Path>,
+        prompt: &str,
+        options: PromptOptions,
+        observer: Option<UpdateObserver>,
+        session_observer: Option<SessionObserver>,
+    ) -> Result<(SessionHandle, PromptResult), AcpError> {
+        let run = self.run_prompt_turn(cwd, prompt, &options, observer, session_observer);
         match options.timeout {
             Some(duration) => tokio::time::timeout(duration, run)
                 .await
@@ -97,6 +120,7 @@ impl AcpClient {
         prompt: &str,
         options: &PromptOptions,
         observer: Option<UpdateObserver>,
+        session_observer: Option<SessionObserver>,
     ) -> Result<(SessionHandle, PromptResult), AcpError> {
         let cwd = cwd.as_ref().to_path_buf();
         let prompt = prompt.to_owned();
@@ -150,33 +174,62 @@ impl AcpClient {
                     .block_task()
                     .await?;
 
-                let mut request = NewSessionRequest::new(&cwd);
-                if let Some(meta) = &options.session_meta {
-                    let map = meta
-                        .as_object()
-                        .cloned()
-                        .ok_or_else(agent_client_protocol::Error::invalid_params)?;
-                    request = request.meta(map);
-                }
-                let session = connection.send_request(request).block_task().await?;
-
-                let handle = SessionHandle {
-                    session_id: session.session_id.to_string(),
+                let meta = options
+                    .session_meta
+                    .as_ref()
+                    .map(|value| {
+                        value
+                            .as_object()
+                            .cloned()
+                            .ok_or_else(agent_client_protocol::Error::invalid_params)
+                    })
+                    .transpose()?;
+                let session_id = match &options.session_start {
+                    SessionStart::New => {
+                        let mut request = NewSessionRequest::new(&cwd);
+                        if let Some(meta) = meta.clone() {
+                            request = request.meta(meta);
+                        }
+                        connection
+                            .send_request(request)
+                            .block_task()
+                            .await?
+                            .session_id
+                    }
+                    SessionStart::Resume(session_id) => {
+                        let mut request = ResumeSessionRequest::new(session_id.clone(), &cwd);
+                        if let Some(meta) = meta.clone() {
+                            request = request.meta(meta);
+                        }
+                        connection.send_request(request).block_task().await?;
+                        session_id.clone().into()
+                    }
+                    SessionStart::Load(session_id) => {
+                        let mut request = LoadSessionRequest::new(session_id.clone(), &cwd);
+                        if let Some(meta) = meta {
+                            request = request.meta(meta);
+                        }
+                        connection.send_request(request).block_task().await?;
+                        session_id.clone().into()
+                    }
                 };
+                let handle = SessionHandle {
+                    session_id: session_id.to_string(),
+                };
+                if let Some(observer) = &session_observer {
+                    observer(&handle.session_id);
+                }
 
                 if let Some(mode) = &options.permission_mode {
                     connection
-                        .send_request(SetSessionModeRequest::new(
-                            session.session_id.clone(),
-                            mode.clone(),
-                        ))
+                        .send_request(SetSessionModeRequest::new(session_id.clone(), mode.clone()))
                         .block_task()
                         .await?;
                 }
                 if let Some(model) = &options.model {
                     connection
                         .send_request(SetSessionConfigOptionRequest::new(
-                            session.session_id.clone(),
+                            session_id.clone(),
                             "model",
                             model.as_str(),
                         ))
@@ -186,7 +239,7 @@ impl AcpClient {
 
                 if let Some(delay) = cancel_after {
                     let connection = connection.clone();
-                    let session_id = session.session_id.clone();
+                    let session_id = session_id.clone();
                     tokio::spawn(async move {
                         tokio::time::sleep(delay).await;
                         let _ = connection.send_notification(
@@ -196,7 +249,7 @@ impl AcpClient {
                 }
 
                 let response = connection
-                    .send_request(PromptRequest::new(session.session_id, vec![prompt.into()]))
+                    .send_request(PromptRequest::new(session_id, vec![prompt.into()]))
                     .block_task()
                     .await?;
 

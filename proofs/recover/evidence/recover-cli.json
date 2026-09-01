@@ -1,0 +1,5 @@
+{
+  "command": "sub recover $HANDLE --state-dir $STATE_DIR",
+  "handle": { "id": "$HANDLE" },
+  "attempt": 2
+}
