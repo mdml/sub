@@ -56,6 +56,8 @@ pub struct PromptResult {
     pub final_text: String,
     /// Per-turn token usage, absent when the harness does not report it.
     pub usage: Option<TurnUsage>,
+    /// Whether a requested cancellation was acknowledged before the grace period ended.
+    pub cancellation_honored: Option<bool>,
 }
 
 /// Handle returned immediately after opening a session.

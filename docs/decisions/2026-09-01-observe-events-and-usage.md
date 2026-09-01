@@ -13,7 +13,8 @@ The supervisor appends one typed JSON object per line to the existing attempt `e
 | `attempt_orphaned` | Explicit recovery confirmed that the predecessor's recorded supervisor was dead. |
 | `attempt_resumed` | A replacement attempt reopened the predecessor's vendor session. |
 | `attempt_resume_failed` | Recovery could not reopen the session because its persisted identity was missing or the harness refused it. |
-| `attempt_cancelled` | The harness confirmed cancellation. |
+| `attempt_cancelled` | Explicit cancellation ended the attempt; `harness_honored` says whether the harness acknowledged it within the grace period. |
+| `attempt_recovery_rejected` | Recovery was rejected because the task was already terminal; its reason is `cancelled` in the beta. |
 | `attempt_finished` | An attempt reached a terminal `succeeded`, `failed`, or `cancelled` status. |
 | `activity` | A coalesced category—message, thought, tool call, tool update, plan, session metadata, available commands, denied permission, observed subagent, or other—arrived from the ACP stream. It contains no message text, thought text, tool output, diff, or other transcript content. |
 | `usage_accumulated` | A reported cost or per-turn token total changed; the event contains current attempt and task totals. |

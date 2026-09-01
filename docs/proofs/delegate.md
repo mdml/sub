@@ -26,3 +26,5 @@ claude -p --output-format json --permission-mode bypassPermissions --disallowedT
 Launch returns `{"id":"tsk_..."}` before the child finishes. Wait returns `state: complete`, `status: succeeded`, `changed_files` containing `$WORK/proof.txt`, artifact references including the native Codex session record, and a Codex harness session ID. The file contains exactly `delegate proof passed`. The manager's output reports zero spawned subagents.
 
 Captured, scrubbed outputs are under [`../../proofs/delegate/evidence/`](../../proofs/delegate/evidence/). The first execution exposed a Codex bridge behavior: file creation through an execute tool had no ACP edit location. The shipped result derivation also folds existing in-workdir Markdown file links from the final stream; the final captured proof shows `changed_files` populated.
+
+This feature composes into the release-gating [beta path](beta-path.md).

@@ -13,7 +13,7 @@ pub mod session;
 pub mod stop_reason;
 pub mod update;
 
-pub use client::{AcpClient, PromptOptions, SessionObserver, UpdateObserver};
+pub use client::{AcpClient, CancellationOptions, PromptOptions, SessionObserver, UpdateObserver};
 pub use config::AcpClientConfig;
 pub use error::AcpError;
 pub use launch::HarnessLaunch;

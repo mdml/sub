@@ -1,0 +1,17 @@
+{
+  "command": "sub recover $HANDLE --state-dir $STATE_DIR",
+  "handle": { "id": "$HANDLE" },
+  "attempt": 2,
+  "observed_after_recover": {
+    "task_status": "running",
+    "attempts": [
+      { "number": 1, "status": "orphaned", "harness_session_id": "$SESSION_ID" },
+      { "number": 2, "status": "running", "harness_session_id": "$SESSION_ID" }
+    ],
+    "lifecycle_events": [
+      { "attempt": 1, "kind": "attempt_orphaned" },
+      { "attempt": 2, "kind": "attempt_started" },
+      { "attempt": 2, "kind": "attempt_resumed" }
+    ]
+  }
+}

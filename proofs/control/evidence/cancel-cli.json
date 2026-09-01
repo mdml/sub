@@ -1,0 +1,6 @@
+{
+  "command": "sub cancel $HANDLE --state-dir $STATE_DIR",
+  "handle": { "id": "$HANDLE" },
+  "attempt": 1,
+  "delivery": "delivered"
+}

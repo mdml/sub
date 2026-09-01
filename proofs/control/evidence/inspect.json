@@ -1,0 +1,19 @@
+{
+  "command": "sub inspect $HANDLE --state-dir $STATE_DIR",
+  "task": {
+    "handle": { "id": "$HANDLE" },
+    "harness": "codex",
+    "status": "cancelled",
+    "usage_support": { "cost": false, "tokens": true },
+    "usage": { "cost": null, "tokens": { "total_tokens": 15934 } }
+  },
+  "attempts": [
+    { "number": 1, "status": "cancelled", "harness_session_id": "$SESSION_ID", "usage": { "tokens": { "total_tokens": 15934 } } }
+  ],
+  "lifecycle_events": [
+    { "attempt": 1, "kind": "attempt_started" },
+    { "attempt": 1, "kind": "usage_accumulated", "attempt_usage": { "tokens": { "total_tokens": 15934 } } },
+    { "attempt": 1, "kind": "attempt_cancelled", "harness_honored": true },
+    { "attempt": 1, "kind": "attempt_finished", "status": "cancelled" }
+  ]
+}

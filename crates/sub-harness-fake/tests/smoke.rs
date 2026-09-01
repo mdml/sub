@@ -5,7 +5,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use sub_sdk::acp::{
-    AcpClient, AcpClientConfig, HarnessLaunch, PromptOptions, StopReason, StreamUpdateKind,
+    AcpClient, AcpClientConfig, AcpError, HarnessLaunch, PromptOptions, StopReason,
+    StreamUpdateKind,
 };
 
 fn harness_binary() -> std::path::PathBuf {
@@ -119,7 +120,7 @@ async fn permission_request_is_denied_and_surfaced() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn ignore_cancel_scenario_completes() {
+async fn ignore_cancel_scenario_keeps_the_prompt_pending() {
     let fixtures = sub_harness_fake::fixtures_dir();
     let scenarios = sub_harness_fake::scenarios_dir();
 
@@ -134,20 +135,21 @@ async fn ignore_cancel_scenario_completes() {
             scenarios.to_string_lossy().into_owned(),
         );
 
-    let (_handle, result) = AcpClient::new(launch, AcpClientConfig::default())
+    let error = AcpClient::new(launch, AcpClientConfig::default())
         .prompt_turn(
             std::env::temp_dir(),
             "ignore cancel",
             PromptOptions {
-                timeout: Some(Duration::from_secs(10)),
+                timeout: Some(Duration::from_millis(500)),
                 cancel_after: Some(Duration::from_millis(50)),
                 ..PromptOptions::default()
             },
         )
         .await
-        .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+        .err()
+        .unwrap_or_else(|| panic!("ignored cancellation must keep the prompt pending"));
 
-    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert!(matches!(error, AcpError::TimedOut(_)));
 }
 
 #[tokio::test(flavor = "current_thread")]

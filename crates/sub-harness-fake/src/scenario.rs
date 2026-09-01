@@ -71,8 +71,8 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../sub-harness-fake/scenarios/cancel_honored.scenario.toml");
         let scenario = Scenario::load(path).unwrap_or_else(|error| panic!("scenario: {error}"));
-        assert_eq!(scenario.fixture, "minimal-cancelled");
-        assert_eq!(scenario.behavior, ScenarioBehavior::Replay);
+        assert_eq!(scenario.fixture, "minimal");
+        assert_eq!(scenario.behavior, ScenarioBehavior::CancelHonored);
     }
 
     #[test]

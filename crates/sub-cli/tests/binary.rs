@@ -97,6 +97,14 @@ fn command_errors_are_actionable() {
     assert!(!recover.status.success());
     assert!(String::from_utf8_lossy(&recover.stderr).contains("unknown task handle"));
 
+    let cancel = Command::new(binary)
+        .args(["cancel", "tsk_000000000000000000000000", "--state-dir"])
+        .arg(root.path())
+        .output()
+        .unwrap_or_else(|error| panic!("run: {error}"));
+    assert!(!cancel.status.success());
+    assert!(String::from_utf8_lossy(&cancel.stderr).contains("unknown task handle"));
+
     let incomplete = Command::new(binary)
         .arg("launch")
         .output()
@@ -136,6 +144,18 @@ fn wait_reports_orphaned_and_recover_starts_the_next_attempt() {
         serde_json::from_slice(&wait.stdout).unwrap_or_else(|error| panic!("wait json: {error}"));
     assert_eq!(wait["state"], "orphaned");
     assert_eq!(wait["status"], "orphaned");
+
+    let cancel = Command::new(binary)
+        .args(["cancel", handle, "--state-dir"])
+        .arg(root.path())
+        .output()
+        .unwrap_or_else(|error| panic!("cancel: {error}"));
+    assert!(cancel.status.success());
+    let cancel: serde_json::Value = serde_json::from_slice(&cancel.stdout)
+        .unwrap_or_else(|error| panic!("cancel json: {error}"));
+    assert_eq!(cancel["handle"]["id"], handle);
+    assert_eq!(cancel["attempt"], 1);
+    assert_eq!(cancel["delivery"], "attempt_orphaned");
 
     let recover = Command::new(binary)
         .args(["recover", handle, "--state-dir"])

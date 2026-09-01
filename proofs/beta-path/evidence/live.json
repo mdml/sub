@@ -1,0 +1,12 @@
+{
+  "command": "sub inspect $HANDLE --state-dir $STATE_DIR",
+  "task": { "handle": { "id": "$HANDLE" }, "harness": "codex", "status": "running" },
+  "attempts": [
+    { "number": 1, "status": "running", "harness_session_id": "$SESSION_ID" }
+  ],
+  "lifecycle_events": [
+    { "attempt": 1, "kind": "attempt_started" },
+    { "attempt": 1, "kind": "activity", "activity": "message" },
+    { "attempt": 1, "kind": "activity", "activity": "tool_call" }
+  ]
+}

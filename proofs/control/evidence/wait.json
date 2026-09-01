@@ -1,0 +1,16 @@
+{
+  "command": "sub wait $HANDLE --timeout-seconds 15 --state-dir $STATE_DIR",
+  "state": "complete",
+  "result": {
+    "status": "cancelled",
+    "summary": "I’ll create the file with the exact requested text, wait 30 seconds, verify it, and link it.",
+    "changed_files": [],
+    "artifacts": [
+      { "kind": "event_log", "location": "$STATE_DIR/tasks/$HANDLE/attempts/1/events.jsonl" },
+      { "kind": "supervisor_log", "location": "$STATE_DIR/tasks/$HANDLE/attempts/1/supervisor.log" },
+      { "kind": "native_session", "location": "$CODEX_HOME/sessions/YYYY/MM/DD/rollout-$SESSION_ID.jsonl" }
+    ],
+    "harness_session_id": "$SESSION_ID"
+  },
+  "worktree_evidence": { "path": "$WORK/partial-control.txt", "content": "control partial evidence" }
+}

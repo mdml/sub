@@ -73,6 +73,21 @@ fn recover(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cancel(args: &[String]) -> Result<(), String> {
+    let id = args
+        .get(1)
+        .ok_or_else(|| "usage: sub cancel HANDLE [--state-dir PATH]".to_owned())?;
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let outcome = Delegator::new(state_dir(args)?, executable)
+        .cancel(&TaskHandle { id: id.clone() })
+        .map_err(|error| error.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
 async fn supervise(args: &[String]) -> Result<(), String> {
     let id = args
         .get(1)
@@ -144,6 +159,7 @@ async fn run() -> Result<(), String> {
             );
         }
         Some("recover") => recover(&args)?,
+        Some("cancel") => cancel(&args)?,
         Some("list") => {
             let executable = env::current_exe().map_err(|error| error.to_string())?;
             let tasks = Delegator::new(state_dir(&args)?, executable)
@@ -169,7 +185,11 @@ async fn run() -> Result<(), String> {
         }
         Some("__supervise") => supervise(&args).await?,
         Some("--version" | "-V") | None => println!("sub {}", sub_sdk::version()),
-        _ => return Err("usage: sub <bridge install|launch|wait|recover|list|inspect>".to_owned()),
+        _ => {
+            return Err(
+                "usage: sub <bridge install|launch|wait|recover|cancel|list|inspect>".to_owned(),
+            );
+        }
     }
     Ok(())
 }

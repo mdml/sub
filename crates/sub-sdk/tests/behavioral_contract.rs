@@ -113,6 +113,7 @@ async fn cancellation_honored() {
         &harness,
         PromptOptions {
             timeout: Some(Duration::from_secs(10)),
+            cancel_after: Some(Duration::from_millis(50)),
             ..PromptOptions::default()
         },
     )
@@ -125,18 +126,19 @@ async fn cancellation_honored() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancellation_ignored() {
     let harness = ContractHarness::select(FakeScenario::IgnoreCancel);
-    let (_handle, result) = prompt(
+    let error = prompt(
         &harness,
         PromptOptions {
-            timeout: Some(Duration::from_secs(10)),
+            timeout: Some(Duration::from_millis(500)),
             cancel_after: Some(Duration::from_millis(50)),
             ..PromptOptions::default()
         },
     )
     .await
-    .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+    .err()
+    .unwrap_or_else(|| panic!("ignored cancellation should reach the client timeout"));
 
-    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert!(matches!(error, AcpError::TimedOut(_)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -320,10 +322,23 @@ async fn real_harness_mode_entrypoint() {
         )
         .await
         .unwrap_or_else(|error| panic!("real harness resume turn: {error}"));
+    let (_, cancelled_result) = client(harness.launch())
+        .prompt_turn(
+            cwd.path(),
+            "Run `sleep 30`, then reply with done.",
+            PromptOptions {
+                timeout: Some(Duration::from_secs(15)),
+                cancel_after: Some(Duration::from_millis(500)),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("real harness cancel turn: {error}"));
 
     assert_eq!(result.stop_reason, StopReason::EndTurn);
     assert_eq!(resumed.session_id, handle.session_id);
     assert_eq!(resumed_result.stop_reason, StopReason::EndTurn);
+    assert_eq!(cancelled_result.stop_reason, StopReason::Cancelled);
     match harness.real_name() {
         Some("claude") => {
             assert!(

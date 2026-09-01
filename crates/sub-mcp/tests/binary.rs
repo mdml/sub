@@ -128,6 +128,21 @@ fn recover_and_orphaned_wait_match_the_cli_over_stdio() {
     assert_eq!(waited["result"]["structuredContent"]["state"], "orphaned");
 
     line.clear();
+    writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sub_cancel","arguments":{"handle":handle,"state_dir":state}}})).unwrap_or_else(|error| panic!("write: {error}"));
+    stdin
+        .flush()
+        .unwrap_or_else(|error| panic!("flush: {error}"));
+    stdout
+        .read_line(&mut line)
+        .unwrap_or_else(|error| panic!("read: {error}"));
+    let cancelled: serde_json::Value =
+        serde_json::from_str(&line).unwrap_or_else(|error| panic!("cancel json: {error}"));
+    assert_eq!(
+        cancelled["result"]["structuredContent"]["delivery"],
+        "attempt_orphaned"
+    );
+
+    line.clear();
     writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sub_recover","arguments":{"handle":handle,"state_dir":state}}})).unwrap_or_else(|error| panic!("write: {error}"));
     stdin
         .flush()

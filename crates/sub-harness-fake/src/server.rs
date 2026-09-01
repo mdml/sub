@@ -132,9 +132,16 @@ pub async fn run_stdio(
                         ScenarioBehavior::PermissionRequest => {
                             SharedState::request_permission(request, responder, &connection)
                         }
-                        ScenarioBehavior::CancelHonored
-                        | ScenarioBehavior::Replay
-                        | ScenarioBehavior::IgnoreCancel
+                        ScenarioBehavior::CancelHonored | ScenarioBehavior::IgnoreCancel => {
+                            let prompt_state = Arc::clone(&state);
+                            tokio::spawn(async move {
+                                let _ = prompt_state
+                                    .replay_prompt(request, responder, connection)
+                                    .await;
+                            });
+                            Ok(())
+                        }
+                        ScenarioBehavior::Replay
                         | ScenarioBehavior::DieMidStream { .. }
                         | ScenarioBehavior::Malformed { .. }
                         | ScenarioBehavior::ResumeRefused => {
@@ -305,6 +312,15 @@ impl SharedState {
                     tokio::time::sleep(Duration::from_millis(event.t_ms)).await;
                 }
             }
+        }
+
+        if matches!(self.behavior, ScenarioBehavior::CancelHonored) {
+            while !self.cancelled.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        if matches!(self.behavior, ScenarioBehavior::IgnoreCancel) {
+            std::future::pending::<()>().await;
         }
 
         responder.respond(self.prompt_response())
