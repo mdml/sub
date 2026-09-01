@@ -67,6 +67,15 @@ impl ContractHarness {
             Self::Real { launch, .. } => launch.clone(),
         }
     }
+
+    /// Real harness name, absent for a fake scenario.
+    #[must_use]
+    pub fn real_name(&self) -> Option<&str> {
+        match self {
+            Self::Fake(_) => None,
+            Self::Real { name, .. } => Some(name),
+        }
+    }
 }
 
 /// Whether real-harness mode is enabled for this process.

@@ -1,0 +1,39 @@
+{
+  "command": "sub inspect $CLAUDE_HANDLE --state-dir $STATE_DIR",
+  "task": {
+    "handle": { "id": "$CLAUDE_HANDLE" },
+    "harness": "claude",
+    "status": "succeeded",
+    "usage_support": { "cost": true, "tokens": true },
+    "usage": {
+      "cost": { "amount": 0.258861, "currency": "USD" },
+      "tokens": {
+        "total_tokens": 47953,
+        "input_tokens": 4,
+        "output_tokens": 257,
+        "thought_tokens": null,
+        "cached_read_tokens": 23632,
+        "cached_write_tokens": 24060
+      }
+    }
+  },
+  "terminal_events": [
+    {
+      "timestamp_unix_ms": 1788280882270,
+      "task_id": "$CLAUDE_HANDLE",
+      "attempt": 1,
+      "kind": "usage_accumulated",
+      "attempt_usage": { "cost": { "amount": 0.258861, "currency": "USD" }, "tokens": null },
+      "task_usage": { "cost": { "amount": 0.258861, "currency": "USD" }, "tokens": null }
+    },
+    {
+      "timestamp_unix_ms": 1788280882287,
+      "task_id": "$CLAUDE_HANDLE",
+      "attempt": 1,
+      "kind": "usage_accumulated",
+      "attempt_usage": { "cost": { "amount": 0.258861, "currency": "USD" }, "tokens": { "total_tokens": 47953, "input_tokens": 4, "output_tokens": 257, "thought_tokens": null, "cached_read_tokens": 23632, "cached_write_tokens": 24060 } },
+      "task_usage": { "cost": { "amount": 0.258861, "currency": "USD" }, "tokens": { "total_tokens": 47953, "input_tokens": 4, "output_tokens": 257, "thought_tokens": null, "cached_read_tokens": 23632, "cached_write_tokens": 24060 } }
+    },
+    { "timestamp_unix_ms": 1788280882290, "task_id": "$CLAUDE_HANDLE", "attempt": 1, "kind": "attempt_finished", "status": "succeeded" }
+  ]
+}

@@ -112,6 +112,29 @@ async fn run() -> Result<(), String> {
                 serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
             );
         }
+        Some("list") => {
+            let executable = env::current_exe().map_err(|error| error.to_string())?;
+            let tasks = Delegator::new(state_dir(&args)?, executable)
+                .list()
+                .map_err(|error| error.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&tasks).map_err(|error| error.to_string())?
+            );
+        }
+        Some("inspect") => {
+            let id = args
+                .get(1)
+                .ok_or_else(|| "usage: sub inspect HANDLE [--state-dir PATH]".to_owned())?;
+            let executable = env::current_exe().map_err(|error| error.to_string())?;
+            let task = Delegator::new(state_dir(&args)?, executable)
+                .inspect(&TaskHandle { id: id.clone() })
+                .map_err(|error| error.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&task).map_err(|error| error.to_string())?
+            );
+        }
         Some("__supervise") => {
             let id = args
                 .get(1)
@@ -121,7 +144,7 @@ async fn run() -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
         }
         Some("--version" | "-V") | None => println!("sub {}", sub_sdk::version()),
-        _ => return Err("usage: sub <bridge install|launch|wait>".to_owned()),
+        _ => return Err("usage: sub <bridge install|launch|wait|list|inspect>".to_owned()),
     }
     Ok(())
 }

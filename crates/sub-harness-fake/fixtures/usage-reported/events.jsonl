@@ -1,0 +1,2 @@
+{"t_ms":250,"kind":"session/update","notification":{"sessionId":"00000000-0000-0000-0000-000000000003","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}
+{"t_ms":250,"kind":"session/update","notification":{"sessionId":"00000000-0000-0000-0000-000000000003","update":{"sessionUpdate":"usage_update","used":100,"size":1000,"cost":{"amount":0.25,"currency":"USD"}}}}

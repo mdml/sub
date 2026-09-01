@@ -62,6 +62,9 @@ pub struct PromptDefaults {
     pub stop_reason: StopReason,
     #[serde(default)]
     pub replay_timing: bool,
+    /// Per-turn token usage returned with prompt completion, when reported.
+    #[serde(default)]
+    pub usage: Option<sub_sdk::acp::TurnUsage>,
 }
 
 /// One line from a spike-compatible events JSONL file.

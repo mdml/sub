@@ -17,6 +17,6 @@ pub use client::{AcpClient, PromptOptions, UpdateObserver};
 pub use config::AcpClientConfig;
 pub use error::AcpError;
 pub use launch::HarnessLaunch;
-pub use session::{PromptResult, SessionHandle};
+pub use session::{PromptResult, SessionHandle, TurnUsage};
 pub use stop_reason::StopReason;
-pub use update::{StreamUpdate, StreamUpdateKind};
+pub use update::{StreamCost, StreamUpdate, StreamUpdateKind};

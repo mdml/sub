@@ -216,6 +216,7 @@ impl AcpClient {
                         stop_reason: StopReason::from(response.stop_reason),
                         updates,
                         final_text,
+                        usage: response.usage.map(Into::into),
                     },
                 );
 

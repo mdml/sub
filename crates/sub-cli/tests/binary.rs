@@ -132,5 +132,26 @@ fn install_launch_and_wait_use_one_durable_shape() {
             String::from_utf8_lossy(&wait.stderr)
         );
         assert!(String::from_utf8_lossy(&wait.stdout).contains("failed"));
+        let listed = Command::new(binary)
+            .args(["list", "--state-dir"])
+            .arg(root.path())
+            .output()
+            .unwrap_or_else(|error| panic!("list: {error}"));
+        assert!(listed.status.success());
+        assert!(String::from_utf8_lossy(&listed.stdout).contains(handle));
+        let inspected = Command::new(binary)
+            .args(["inspect", handle, "--state-dir"])
+            .arg(root.path())
+            .output()
+            .unwrap_or_else(|error| panic!("inspect: {error}"));
+        assert!(inspected.status.success());
+        let inspection: serde_json::Value = serde_json::from_slice(&inspected.stdout)
+            .unwrap_or_else(|error| panic!("inspect json: {error}"));
+        assert_eq!(inspection["task"]["handle"]["id"], handle);
+        assert!(
+            inspection["task"]["usage_support"]["tokens"]
+                .as_bool()
+                .is_some()
+        );
     }
 }

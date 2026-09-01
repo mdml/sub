@@ -19,7 +19,7 @@ impl ContentBlockExt for agent_client_protocol::schema::v1::ContentBlock {
 }
 
 /// One normalized update from a running prompt turn.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamUpdate {
     /// Which kind of session update this represents.
     pub kind: StreamUpdateKind,
@@ -27,6 +27,17 @@ pub struct StreamUpdate {
     pub text: Option<String>,
     /// File locations attached to an edit, delete, or move tool call.
     pub changed_files: Vec<PathBuf>,
+    /// Latest cumulative session cost when reported with usage.
+    pub cost: Option<StreamCost>,
+}
+
+/// Cost reported on an ACP usage update.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StreamCost {
+    /// Numeric amount in the reported currency.
+    pub amount: f64,
+    /// ISO 4217 currency code.
+    pub currency: String,
 }
 
 /// The kind of activity reported in a session update.
@@ -64,6 +75,7 @@ impl StreamUpdate {
             kind: StreamUpdateKind::PermissionDenied,
             text: request.tool_call.fields.title.clone(),
             changed_files: Vec::new(),
+            cost: None,
         }
     }
 
@@ -77,16 +89,19 @@ impl StreamUpdate {
                 kind: StreamUpdateKind::AgentMessageChunk,
                 text: chunk.content.as_text().map(str::to_owned),
                 changed_files: Vec::new(),
+                cost: None,
             },
             SessionUpdate::AgentThoughtChunk(chunk) => Self {
                 kind: StreamUpdateKind::AgentThoughtChunk,
                 text: chunk.content.as_text().map(str::to_owned),
                 changed_files: Vec::new(),
+                cost: None,
             },
             SessionUpdate::ToolCall(tool) => Self {
                 kind: StreamUpdateKind::ToolCall,
                 text: Some(tool.title.clone()),
                 changed_files: changed_locations(tool.kind, &tool.locations),
+                cost: None,
             },
             SessionUpdate::ToolCallUpdate(tool) => Self {
                 kind: StreamUpdateKind::ToolCallUpdate,
@@ -100,31 +115,40 @@ impl StreamUpdate {
                             .kind
                             .map_or_else(Vec::new, |kind| changed_locations(kind, locations))
                     }),
+                cost: None,
             },
-            SessionUpdate::UsageUpdate(_) => Self {
+            SessionUpdate::UsageUpdate(usage) => Self {
                 kind: StreamUpdateKind::UsageUpdate,
                 text: None,
                 changed_files: Vec::new(),
+                cost: usage.cost.as_ref().map(|cost| StreamCost {
+                    amount: cost.amount,
+                    currency: cost.currency.clone(),
+                }),
             },
             SessionUpdate::SessionInfoUpdate(_) => Self {
                 kind: StreamUpdateKind::SessionInfoUpdate,
                 text: None,
                 changed_files: Vec::new(),
+                cost: None,
             },
             SessionUpdate::AvailableCommandsUpdate(_) => Self {
                 kind: StreamUpdateKind::AvailableCommandsUpdate,
                 text: None,
                 changed_files: Vec::new(),
+                cost: None,
             },
             SessionUpdate::Plan(_) => Self {
                 kind: StreamUpdateKind::Plan,
                 text: None,
                 changed_files: Vec::new(),
+                cost: None,
             },
             _ => Self {
                 kind: StreamUpdateKind::Other,
                 text: None,
                 changed_files: Vec::new(),
+                cost: None,
             },
         }
     }

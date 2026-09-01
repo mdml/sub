@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Read-only Observe controls: CLI `sub list` and `sub inspect`, MCP `sub_list` and `sub_inspect`, and shared SDK list/inspection types that work independently from a running or completed supervisor.
+- Typed normalized task events for task/attempt linkage, attempt lifecycle, coalesced activity, and accumulated usage without transcript duplication.
+- Per-turn token capture through the ACP SDK's unstable usage feature and streamed cost capture, with explicit harness support and absent—not zero—unreported measurements.
+- Fake-harness fixtures with and without usage, live and terminal Observe contract coverage, real Claude/Codex usage assertions, and a re-runnable Observe proof with scrubbed evidence.
 - Delegated-work kernel in `sub-sdk`: opaque task handles, one persisted execution attempt, independent per-attempt supervisors, append-only events, repeatable bounded wait, and results derived from ACP streams and stop reasons.
 - Claude Code and Codex adapters with exact bridge/version declarations, user-harness binary selection, permission-mode/model forwarding, subagent restrictions, and native session records retained by reference.
 - Explicit pinned bridge installation through CLI and MCP with per-version manifests and SHA-256 tree integrity checks; launch never fetches a bridge.

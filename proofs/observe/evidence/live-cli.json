@@ -1,0 +1,24 @@
+{
+  "command": "sub inspect $CODEX_HANDLE --state-dir $STATE_DIR",
+  "task": {
+    "handle": { "id": "$CODEX_HANDLE" },
+    "harness": "codex",
+    "status": "running",
+    "usage_support": { "cost": false, "tokens": true },
+    "usage": { "cost": null, "tokens": null }
+  },
+  "attempts": [
+    {
+      "number": 1,
+      "status": "running",
+      "harness_session_id": null,
+      "usage": { "cost": null, "tokens": null }
+    }
+  ],
+  "events": [
+    { "timestamp_unix_ms": 1788280908914, "task_id": "$CODEX_HANDLE", "attempt": 1, "kind": "task_created" },
+    { "timestamp_unix_ms": 1788280908940, "task_id": "$CODEX_HANDLE", "attempt": 1, "kind": "attempt_started" },
+    { "timestamp_unix_ms": 1788280909645, "task_id": "$CODEX_HANDLE", "attempt": 1, "kind": "activity", "activity": "available_commands" },
+    { "timestamp_unix_ms": 1788280909704, "task_id": "$CODEX_HANDLE", "attempt": 1, "kind": "activity", "activity": "session_info" }
+  ]
+}
