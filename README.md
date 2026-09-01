@@ -6,7 +6,7 @@ Give the coding agent you already use subagents from any supported coding harnes
 
 ## Status
 
-Current proofs: Delegate passes from a real Claude Code manager to a real Codex child, and Observe passes live and after completion on real Claude Code and Codex tasks through independent CLI and MCP processes. Recover and Control remain later proofs. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), and [`CHANGELOG.md`](CHANGELOG.md).
+Current proofs: Delegate passes from a real Claude Code manager to a real Codex child; Observe passes live and after completion on real Claude Code and Codex tasks through independent CLI and MCP processes; Recover passes both replacement-manager wait and replacement-supervisor session resume. Control remains a later proof. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), and [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Try launch, wait, and Observe
 

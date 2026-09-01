@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Explicit Recover controls: SDK `Delegator::recover`, CLI `sub recover`, and MCP `sub_recover`, which create attempt N+1 and resume an orphaned Claude or Codex harness session through a fresh detached supervisor.
+- Direct supervisor liveness evidence with PID-reuse protection on Linux, the distinct `orphaned` task status, resume lifecycle/failure events, sequential attempt observation, and task-level usage accumulation across attempts.
+- Fake-harness resume acceptance, refusal, missing-session coverage, real Claude/Codex cross-process resume contracts, and the two-leg Recover proof with scrubbed evidence.
 - Read-only Observe controls: CLI `sub list` and `sub inspect`, MCP `sub_list` and `sub_inspect`, and shared SDK list/inspection types that work independently from a running or completed supervisor.
 - Typed normalized task events for task/attempt linkage, attempt lifecycle, coalesced activity, and accumulated usage without transcript duplication.
 - Per-turn token capture through the ACP SDK's unstable usage feature and streamed cost capture, with explicit harness support and absent—not zero—unreported measurements.

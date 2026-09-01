@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::acp::{
-    AcpClient, AcpClientConfig, HarnessLaunch, PromptOptions, StopReason, StreamUpdate,
-    StreamUpdateKind, TurnUsage, UpdateObserver,
+    AcpClient, AcpClientConfig, HarnessLaunch, PromptOptions, SessionObserver, SessionStart,
+    StopReason, StreamUpdate, StreamUpdateKind, TurnUsage, UpdateObserver,
 };
 
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -109,26 +109,29 @@ pub struct LaunchParams {
     pub permission_mode: String,
 }
 
-/// One semantic delegated task and its single beta execution attempt.
+/// One semantic delegated task and its initial execution attempt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DelegatedTask {
     /// Stable task identity used by controls.
     pub handle: TaskHandle,
     /// Inputs supplied by the manager.
     pub params: LaunchParams,
-    /// The task's sole execution attempt in the beta.
+    /// The task's initial execution attempt; recovery attempts live in numbered state directories.
     pub attempt: ExecutionAttempt,
 }
 
 /// One process invocation of a harness under a delegated task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionAttempt {
-    /// Attempt number, always `1` in the beta.
+    /// Sequential attempt number within the task.
     pub number: u32,
     /// Latest durable lifecycle status.
     pub status: TaskStatus,
     /// Supervisor process identifier when known.
     pub supervisor_pid: Option<u32>,
+    /// Operating-system process start token used to reject PID reuse.
+    #[serde(default)]
+    pub supervisor_start_time: Option<u64>,
     /// Vendor-owned session identifier once session creation succeeds.
     pub harness_session_id: Option<String>,
     /// Usage accumulated for this attempt.
@@ -145,6 +148,18 @@ pub struct AdapterLaunch {
     pub session_meta: serde_json::Value,
     /// Prompt guard enforcing one level of delegation.
     pub delegation_guard: String,
+    /// ACP mechanism the bridge implements for cross-process session recovery.
+    pub resume_mechanism: ResumeMechanism,
+}
+
+/// ACP v1 mechanism used by a harness bridge to reopen a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumeMechanism {
+    /// `session/resume`, without replaying the transcript.
+    Resume,
+    /// `session/load`, whose bridge may replay the transcript as updates.
+    Load,
 }
 
 /// Lifecycle status derived and persisted by `sub`.
@@ -153,8 +168,10 @@ pub struct AdapterLaunch {
 pub enum TaskStatus {
     /// Supervisor has not started the ACP connection yet.
     Queued,
-    /// The single beta execution attempt is active.
+    /// The latest execution attempt is active.
     Running,
+    /// The attempt was running, but its recorded supervisor process is gone.
+    Orphaned,
     /// The child ended its turn normally.
     Succeeded,
     /// The child or bridge failed, refused, or exhausted a limit.
@@ -208,6 +225,11 @@ pub enum WaitOutcome {
         /// Latest persisted lifecycle status.
         status: TaskStatus,
     },
+    /// The latest attempt's recorded supervisor is no longer alive.
+    Orphaned {
+        /// Explicit orphaned lifecycle status.
+        status: TaskStatus,
+    },
     /// The task has a durable result.
     Complete {
         /// Derived result handoff.
@@ -249,8 +271,15 @@ pub enum TaskEventKind {
     TaskCreated,
     /// A new attempt started.
     AttemptStarted,
+    /// A running attempt's recorded supervisor was no longer alive.
+    AttemptOrphaned,
     /// A harness session was resumed in a replacement attempt.
     AttemptResumed,
+    /// Recovery could not resume the recorded harness session.
+    AttemptResumeFailed {
+        /// Stable failure category; diagnostics remain in the supervisor log and result.
+        reason: ResumeFailureReason,
+    },
     /// An attempt was cancelled.
     AttemptCancelled,
     /// An attempt reached a terminal state.
@@ -270,6 +299,25 @@ pub enum TaskEventKind {
         /// Accumulated usage across the task's attempts.
         task_usage: Box<UsageTotals>,
     },
+}
+
+/// Why a recovery attempt could not resume its predecessor's harness session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumeFailureReason {
+    /// The orphaned attempt had not durably recorded a harness session identity.
+    SessionRecordMissing,
+    /// The fresh bridge process refused or failed to reopen the recorded session.
+    HarnessRefused,
+}
+
+/// Immediate response from explicit recovery.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoverOutcome {
+    /// Stable delegated-task handle.
+    pub handle: TaskHandle,
+    /// Newly created sequential attempt number.
+    pub attempt: u32,
 }
 
 /// One append-only event record written by the supervisor.
@@ -336,6 +384,8 @@ pub struct TaskInspection {
 struct SupervisorRequest {
     params: LaunchParams,
     adapter: AdapterLaunch,
+    #[serde(default)]
+    resume_session_id: Option<String>,
 }
 
 /// Delegation kernel bound to a private state directory and supervisor executable.
@@ -360,6 +410,9 @@ pub enum DelegationError {
     /// The handle does not name a known task.
     #[error("unknown task handle: {0}")]
     UnknownHandle(String),
+    /// The task's latest attempt is not orphaned and cannot be recovered.
+    #[error("task is not orphaned: {0}")]
+    NotOrphaned(String),
 }
 
 impl Delegator {
@@ -401,6 +454,7 @@ impl Delegator {
             number: 1,
             status: TaskStatus::Queued,
             supervisor_pid: None,
+            supervisor_start_time: None,
             harness_session_id: None,
             usage: UsageTotals::default(),
         };
@@ -412,7 +466,14 @@ impl Delegator {
                 attempt: attempt.clone(),
             },
         )?;
-        write_json(&paths.request, &SupervisorRequest { params, adapter })?;
+        write_json(
+            &paths.request,
+            &SupervisorRequest {
+                params,
+                adapter,
+                resume_session_id: None,
+            },
+        )?;
         write_json(&paths.state, &attempt)?;
         append_event(&paths.events, &handle, 1, TaskEventKind::TaskCreated)?;
         let log = OpenOptions::new()
@@ -421,7 +482,7 @@ impl Delegator {
             .open(&paths.supervisor_log)?;
         let mut command = supervisor_command(&self.supervisor_executable);
         let child = command
-            .args(["__supervise", &handle.id, "--state-dir"])
+            .args(["__supervise", &handle.id, "1", "--state-dir"])
             .arg(&self.state_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))
@@ -433,11 +494,85 @@ impl Delegator {
                 number: 1,
                 status: TaskStatus::Queued,
                 supervisor_pid: Some(child.id()),
+                supervisor_start_time: process_start_time(child.id()),
                 harness_session_id: None,
                 usage: UsageTotals::default(),
             },
         )?;
         Ok(handle)
+    }
+
+    /// Start a new sequential attempt that resumes an orphaned attempt's harness session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown task, a latest attempt that is not orphaned, persistence
+    /// failure, or supervisor spawn failure.
+    pub fn recover(&self, handle: &TaskHandle) -> Result<RecoverOutcome, DelegationError> {
+        validate_handle(handle)?;
+        let initial_paths = TaskPaths::new(&self.state_dir, handle);
+        if !initial_paths.task.is_file() || !initial_paths.state.is_file() {
+            return Err(DelegationError::UnknownHandle(handle.id.clone()));
+        }
+        let prior_number = latest_attempt_number(&self.state_dir, handle)?;
+        let prior_paths = TaskPaths::for_attempt(&self.state_dir, handle, prior_number);
+        let prior: ExecutionAttempt = read_json(&prior_paths.state)?;
+        if effective_status(&prior) != TaskStatus::Orphaned {
+            return Err(DelegationError::NotOrphaned(handle.id.clone()));
+        }
+        append_event(
+            &prior_paths.events,
+            handle,
+            prior_number,
+            TaskEventKind::AttemptOrphaned,
+        )?;
+
+        let number = prior_number + 1;
+        let paths = TaskPaths::for_attempt(&self.state_dir, handle, number);
+        fs::create_dir(&paths.attempt)?;
+        let mut request: SupervisorRequest = read_json(&prior_paths.request)?;
+        request
+            .resume_session_id
+            .clone_from(&prior.harness_session_id);
+        write_json(&paths.request, &request)?;
+        let queued = ExecutionAttempt {
+            number,
+            status: TaskStatus::Queued,
+            supervisor_pid: None,
+            supervisor_start_time: None,
+            harness_session_id: prior.harness_session_id,
+            usage: UsageTotals::default(),
+        };
+        write_json(&paths.state, &queued)?;
+        let log = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&paths.supervisor_log)?;
+        let mut command = supervisor_command(&self.supervisor_executable);
+        let child = command
+            .args([
+                "__supervise",
+                &handle.id,
+                &number.to_string(),
+                "--state-dir",
+            ])
+            .arg(&self.state_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(log.try_clone()?))
+            .stderr(Stdio::from(log))
+            .spawn()?;
+        write_json(
+            &paths.state,
+            &ExecutionAttempt {
+                supervisor_pid: Some(child.id()),
+                supervisor_start_time: process_start_time(child.id()),
+                ..queued
+            },
+        )?;
+        Ok(RecoverOutcome {
+            handle: handle.clone(),
+            attempt: number,
+        })
     }
 
     /// Wait up to `timeout` for a durable result; a caller may repeat this with the same handle.
@@ -451,22 +586,26 @@ impl Delegator {
         timeout: Duration,
     ) -> Result<WaitOutcome, DelegationError> {
         validate_handle(handle)?;
-        let paths = TaskPaths::new(&self.state_dir, handle);
-        if !paths.state.is_file() {
+        let initial_paths = TaskPaths::new(&self.state_dir, handle);
+        if !initial_paths.state.is_file() {
             return Err(DelegationError::UnknownHandle(handle.id.clone()));
         }
         let deadline = Instant::now() + timeout;
         loop {
+            let number = latest_attempt_number(&self.state_dir, handle)?;
+            let paths = TaskPaths::for_attempt(&self.state_dir, handle, number);
             if paths.result.is_file() {
                 return Ok(WaitOutcome::Complete {
                     result: read_json(&paths.result)?,
                 });
             }
             let state: ExecutionAttempt = read_json(&paths.state)?;
+            let status = effective_status(&state);
+            if status == TaskStatus::Orphaned {
+                return Ok(WaitOutcome::Orphaned { status });
+            }
             if Instant::now() >= deadline {
-                return Ok(WaitOutcome::Running {
-                    status: state.status,
-                });
+                return Ok(WaitOutcome::Running { status });
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -541,49 +680,129 @@ fn supervisor_command(executable: &Path) -> Command {
     }
 }
 
-/// Run the one-attempt supervisor for a previously launched handle.
+/// Run one numbered attempt supervisor for a previously launched handle.
 ///
 /// # Errors
 ///
 /// Returns an error when persisted state cannot be read or written.
-pub async fn run_supervisor(state_dir: &Path, handle: &TaskHandle) -> Result<(), DelegationError> {
+pub async fn run_supervisor(
+    state_dir: &Path,
+    handle: &TaskHandle,
+    number: u32,
+) -> Result<(), DelegationError> {
     validate_handle(handle)?;
-    let paths = TaskPaths::new(state_dir, handle);
+    let paths = TaskPaths::for_attempt(state_dir, handle, number);
     let request: SupervisorRequest = read_json(&paths.request)?;
     let running = ExecutionAttempt {
-        number: 1,
+        number,
         status: TaskStatus::Running,
         supervisor_pid: Some(std::process::id()),
+        supervisor_start_time: process_start_time(std::process::id()),
         harness_session_id: None,
         usage: UsageTotals::default(),
     };
     write_json(&paths.state, &running)?;
-    append_event(&paths.events, handle, 1, TaskEventKind::AttemptStarted)?;
+    append_event(&paths.events, handle, number, TaskEventKind::AttemptStarted)?;
 
-    let observer = update_observer(&paths, handle, running);
+    let observer = update_observer(&paths, handle, running.clone());
+    let is_resume = request.resume_session_id.is_some();
+    let session_observer = session_observer(&paths, handle, running.clone(), is_resume);
     let harness = request.params.harness;
     let cwd = request.params.cwd.clone();
-    let prompt = format!(
-        "{}\n\n{}",
-        request.params.prompt, request.adapter.delegation_guard
-    );
+    if number > 1 && request.resume_session_id.is_none() {
+        append_event(
+            &paths.events,
+            handle,
+            number,
+            TaskEventKind::AttemptResumeFailed {
+                reason: ResumeFailureReason::SessionRecordMissing,
+            },
+        )?;
+        let result = TaskResult {
+            status: TaskStatus::Failed,
+            summary: "recovery failed: orphaned attempt has no recorded harness session id"
+                .to_owned(),
+            changed_files: Vec::new(),
+            artifacts: base_artifacts(&paths),
+            harness_session_id: None,
+        };
+        return finish_attempt(&paths, handle, number, &result, None);
+    }
+    let prompt = if is_resume {
+        format!(
+            "Continue the delegated task from the interrupted attempt. Do not restart it from scratch.\n\n{}",
+            request.adapter.delegation_guard
+        )
+    } else {
+        format!(
+            "{}\n\n{}",
+            request.params.prompt, request.adapter.delegation_guard
+        )
+    };
+    let session_start =
+        request
+            .resume_session_id
+            .as_ref()
+            .map_or(SessionStart::New, |session_id| {
+                match request.adapter.resume_mechanism {
+                    ResumeMechanism::Resume => SessionStart::Resume(session_id.clone()),
+                    ResumeMechanism::Load => SessionStart::Load(session_id.clone()),
+                }
+            });
     let client = AcpClient::new(request.adapter.bridge, AcpClientConfig::default());
     let outcome = client
-        .prompt_turn_observing(
+        .prompt_turn_observing_session(
             &request.params.cwd,
             &prompt,
             PromptOptions {
                 permission_mode: Some(request.params.permission_mode),
                 model: request.params.model,
                 session_meta: Some(request.adapter.session_meta),
+                session_start,
                 ..PromptOptions::default()
             },
             Some(observer),
+            Some(session_observer),
         )
         .await;
 
+    if is_resume && outcome.is_err() {
+        append_event(
+            &paths.events,
+            handle,
+            number,
+            TaskEventKind::AttemptResumeFailed {
+                reason: ResumeFailureReason::HarnessRefused,
+            },
+        )?;
+    }
+
     let (result, tokens) = derive_task_result(outcome, &paths, harness, &cwd);
-    finish_attempt(&paths, handle, &result, tokens)
+    finish_attempt(&paths, handle, number, &result, tokens)
+}
+
+fn session_observer(
+    paths: &TaskPaths,
+    handle: &TaskHandle,
+    running: ExecutionAttempt,
+    resumed: bool,
+) -> SessionObserver {
+    let state_path = paths.state.clone();
+    let events = paths.events.clone();
+    let handle = handle.clone();
+    Arc::new(move |session_id| {
+        let mut attempt = running.clone();
+        attempt.harness_session_id = Some(session_id.to_owned());
+        let _ = write_json(&state_path, &attempt);
+        if resumed {
+            let _ = append_event(
+                &events,
+                &handle,
+                attempt.number,
+                TaskEventKind::AttemptResumed,
+            );
+        }
+    })
 }
 
 fn update_observer(
@@ -603,6 +822,9 @@ fn update_observer(
         if let Ok(mut state) = observer_state.lock() {
             let subagent_observed = looks_like_subagent(&update);
             if let Some(cost) = &update.cost {
+                if let Ok(current) = read_json::<ExecutionAttempt>(&state.state) {
+                    state.attempt.harness_session_id = current.harness_session_id;
+                }
                 state.attempt.usage.cost = Some(UsageCost {
                     amount: cost.amount,
                     currency: cost.currency.clone(),
@@ -614,7 +836,7 @@ fn update_observer(
                 let _ = append_event(
                     &state.events,
                     &state.handle,
-                    1,
+                    state.attempt.number,
                     TaskEventKind::UsageAccumulated {
                         attempt_usage: Box::new(usage),
                         task_usage: Box::new(task_usage),
@@ -628,7 +850,7 @@ fn update_observer(
                 let _ = append_event(
                     &state.events,
                     &state.handle,
-                    1,
+                    state.attempt.number,
                     TaskEventKind::Activity { activity },
                 );
             }
@@ -673,6 +895,7 @@ fn derive_task_result(
 fn finish_attempt(
     paths: &TaskPaths,
     handle: &TaskHandle,
+    number: u32,
     result: &TaskResult,
     tokens: Option<TurnUsage>,
 ) -> Result<(), DelegationError> {
@@ -691,7 +914,7 @@ fn finish_attempt(
         append_event(
             &paths.events,
             handle,
-            1,
+            number,
             TaskEventKind::UsageAccumulated {
                 attempt_usage: Box::new(usage.clone()),
                 task_usage: Box::new(task_usage),
@@ -702,20 +925,29 @@ fn finish_attempt(
     write_json(
         &paths.state,
         &ExecutionAttempt {
-            number: 1,
+            number,
             status: result.status,
             supervisor_pid: Some(std::process::id()),
-            harness_session_id: result.harness_session_id.clone(),
+            supervisor_start_time: current.supervisor_start_time,
+            harness_session_id: result
+                .harness_session_id
+                .clone()
+                .or(current.harness_session_id),
             usage,
         },
     )?;
     if result.status == TaskStatus::Cancelled {
-        append_event(&paths.events, handle, 1, TaskEventKind::AttemptCancelled)?;
+        append_event(
+            &paths.events,
+            handle,
+            number,
+            TaskEventKind::AttemptCancelled,
+        )?;
     }
     append_event(
         &paths.events,
         handle,
-        1,
+        number,
         TaskEventKind::AttemptFinished {
             status: result.status,
         },
@@ -814,6 +1046,58 @@ fn status_from_stop(reason: StopReason) -> TaskStatus {
         StopReason::MaxTokens | StopReason::MaxTurnRequests | StopReason::Refusal => {
             TaskStatus::Failed
         }
+    }
+}
+
+fn effective_status(attempt: &ExecutionAttempt) -> TaskStatus {
+    if attempt.status == TaskStatus::Running && !supervisor_is_alive(attempt) {
+        TaskStatus::Orphaned
+    } else {
+        attempt.status
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_start_time(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let fields = stat
+        .rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    fields.get(19)?.parse().ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_start_time(_pid: u32) -> Option<u64> {
+    None
+}
+
+fn supervisor_is_alive(attempt: &ExecutionAttempt) -> bool {
+    let Some(pid) = attempt.supervisor_pid else {
+        return false;
+    };
+    #[cfg(target_os = "linux")]
+    {
+        let Some(expected) = attempt.supervisor_start_time else {
+            return false;
+        };
+        let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        let Some((_, rest)) = stat.rsplit_once(") ") else {
+            return false;
+        };
+        let fields = rest.split_whitespace().collect::<Vec<_>>();
+        fields.first().is_some_and(|state| *state != "Z")
+            && fields.get(19).and_then(|value| value.parse::<u64>().ok()) == Some(expected)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .is_ok_and(|status| status.success())
     }
 }
 
@@ -1003,13 +1287,23 @@ fn read_attempts(
         add_usage(&mut usage, &attempt.usage);
         attempts.push(AttemptObservation {
             number: attempt.number,
-            status: attempt.status,
+            status: effective_status(&attempt),
             harness_session_id: attempt.harness_session_id,
             usage: attempt.usage,
         });
         events.extend(read_events(&paths.events)?);
     }
     Ok((attempts, events, usage))
+}
+
+fn latest_attempt_number(state_dir: &Path, handle: &TaskHandle) -> Result<u32, DelegationError> {
+    let root = state_dir.join("tasks").join(&handle.id).join("attempts");
+    fs::read_dir(root)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+        .max()
+        .ok_or_else(|| DelegationError::UnknownHandle(handle.id.clone()))
 }
 
 fn read_task_usage(task_root: &Path) -> Result<UsageTotals, DelegationError> {
@@ -1151,7 +1445,9 @@ mod tests {
                     ),
                 session_meta: serde_json::json!({}),
                 delegation_guard: "Do not use subagents.".to_owned(),
+                resume_mechanism: ResumeMechanism::Resume,
             },
+            resume_session_id: None,
         }
     }
 
@@ -1163,6 +1459,19 @@ mod tests {
         let paths = TaskPaths::new(root, handle);
         fs::create_dir_all(&paths.attempt).unwrap_or_else(|error| panic!("mkdir: {error}"));
         write_json(&paths.request, request).unwrap_or_else(|error| panic!("request: {error}"));
+        paths
+    }
+
+    fn prepare_resume_attempt(
+        root: &Path,
+        handle: &TaskHandle,
+        mut request: SupervisorRequest,
+        session_id: Option<&str>,
+    ) -> TaskPaths {
+        let paths = TaskPaths::for_attempt(root, handle, 2);
+        fs::create_dir_all(&paths.attempt).unwrap_or_else(|error| panic!("mkdir: {error}"));
+        request.resume_session_id = session_id.map(str::to_owned);
+        write_json(&paths.request, &request).unwrap_or_else(|error| panic!("request: {error}"));
         paths
     }
 
@@ -1180,6 +1489,7 @@ mod tests {
                 number: 1,
                 status: TaskStatus::Succeeded,
                 supervisor_pid: None,
+                supervisor_start_time: None,
                 harness_session_id: Some("session".to_owned()),
                 usage: UsageTotals::default(),
             },
@@ -1221,7 +1531,8 @@ mod tests {
             &ExecutionAttempt {
                 number: 1,
                 status: TaskStatus::Running,
-                supervisor_pid: None,
+                supervisor_pid: Some(std::process::id()),
+                supervisor_start_time: process_start_time(std::process::id()),
                 harness_session_id: None,
                 usage: UsageTotals::default(),
             },
@@ -1237,6 +1548,95 @@ mod tests {
             WaitOutcome::Running {
                 status: TaskStatus::Running
             }
+        );
+    }
+
+    #[test]
+    fn inspect_reports_dead_running_supervisor_as_orphaned() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_999999999999999999999999".to_owned(),
+        };
+        let paths = TaskPaths::new(root.path(), &handle);
+        fs::create_dir_all(&paths.attempt).unwrap_or_else(|error| panic!("mkdir: {error}"));
+        let attempt = ExecutionAttempt {
+            number: 1,
+            status: TaskStatus::Running,
+            supervisor_pid: Some(u32::MAX),
+            supervisor_start_time: Some(1),
+            harness_session_id: Some("fixture-session".to_owned()),
+            usage: UsageTotals::default(),
+        };
+        write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: LaunchParams {
+                    harness: Harness::Codex,
+                    prompt: "probe".to_owned(),
+                    cwd: root.path().to_path_buf(),
+                    harness_binary: std::env::current_exe()
+                        .unwrap_or_else(|error| panic!("exe: {error}")),
+                    model: None,
+                    permission_mode: "agent".to_owned(),
+                },
+                attempt,
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+
+        let observed = Delegator::new(root.path(), "/does/not/run")
+            .inspect(&handle)
+            .unwrap_or_else(|error| panic!("inspect: {error}"));
+        assert_eq!(observed.task.status, TaskStatus::Orphaned);
+        assert_eq!(observed.attempts[0].status, TaskStatus::Orphaned);
+    }
+
+    #[test]
+    fn recover_creates_a_sequential_attempt_for_the_recorded_session() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_121212121212121212121212".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-minimal");
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        let attempt = ExecutionAttempt {
+            number: 1,
+            status: TaskStatus::Running,
+            supervisor_pid: Some(u32::MAX),
+            supervisor_start_time: Some(1),
+            harness_session_id: Some("fixture-session".to_owned()),
+            usage: UsageTotals::default(),
+        };
+        write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params,
+                attempt,
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+
+        let recovered = Delegator::new(root.path(), "/bin/true")
+            .recover(&handle)
+            .unwrap_or_else(|error| panic!("recover: {error}"));
+        assert_eq!(recovered.handle, handle);
+        assert_eq!(recovered.attempt, 2);
+        let next_paths = TaskPaths::for_attempt(root.path(), &handle, 2);
+        let next_request: SupervisorRequest =
+            read_json(&next_paths.request).unwrap_or_else(|error| panic!("request: {error}"));
+        assert_eq!(
+            next_request.resume_session_id.as_deref(),
+            Some("fixture-session")
+        );
+        let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.kind, TaskEventKind::AttemptOrphaned))
         );
     }
 
@@ -1279,7 +1679,7 @@ mod tests {
             &handle,
             &fake_request(root.path(), "replay-minimal"),
         );
-        run_supervisor(root.path(), &handle)
+        run_supervisor(root.path(), &handle, 1)
             .await
             .unwrap_or_else(|error| panic!("supervisor: {error}"));
         let result: TaskResult =
@@ -1292,6 +1692,88 @@ mod tests {
                 .unwrap_or_else(|error| panic!("events: {error}"))
                 .contains("attempt_finished")
         );
+    }
+
+    #[tokio::test]
+    async fn resume_attempt_succeeds_with_same_session_lineage() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_abababababababababababab".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-minimal");
+        let session_id = "00000000-0000-0000-0000-000000000001";
+        let paths = prepare_resume_attempt(root.path(), &handle, request, Some(session_id));
+
+        run_supervisor(root.path(), &handle, 2)
+            .await
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+
+        let state: ExecutionAttempt =
+            read_json(&paths.state).unwrap_or_else(|error| panic!("state: {error}"));
+        assert_eq!(state.status, TaskStatus::Succeeded);
+        assert_eq!(state.harness_session_id.as_deref(), Some(session_id));
+        let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
+        assert!(events.iter().any(|event| {
+            event.attempt == 2 && matches!(event.kind, TaskEventKind::AttemptResumed)
+        }));
+    }
+
+    #[tokio::test]
+    async fn resume_attempt_fails_when_session_record_is_missing() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_cdcdcdcdcdcdcdcdcdcdcdcd".to_owned(),
+        };
+        let paths = prepare_resume_attempt(
+            root.path(),
+            &handle,
+            fake_request(root.path(), "replay-minimal"),
+            None,
+        );
+
+        run_supervisor(root.path(), &handle, 2)
+            .await
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+
+        let result: TaskResult =
+            read_json(&paths.result).unwrap_or_else(|error| panic!("result: {error}"));
+        assert_eq!(result.status, TaskStatus::Failed);
+        let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            TaskEventKind::AttemptResumeFailed {
+                reason: ResumeFailureReason::SessionRecordMissing
+            }
+        )));
+    }
+
+    #[tokio::test]
+    async fn resume_attempt_records_harness_refusal() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_efefefefefefefefefefefef".to_owned(),
+        };
+        let paths = prepare_resume_attempt(
+            root.path(),
+            &handle,
+            fake_request(root.path(), "resume-refused"),
+            Some("00000000-0000-0000-0000-000000000001"),
+        );
+
+        run_supervisor(root.path(), &handle, 2)
+            .await
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+
+        let result: TaskResult =
+            read_json(&paths.result).unwrap_or_else(|error| panic!("result: {error}"));
+        assert_eq!(result.status, TaskStatus::Failed);
+        let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            TaskEventKind::AttemptResumeFailed {
+                reason: ResumeFailureReason::HarnessRefused
+            }
+        )));
     }
 
     #[tokio::test]
@@ -1311,6 +1793,7 @@ mod tests {
                     number: 1,
                     status: TaskStatus::Queued,
                     supervisor_pid: None,
+                    supervisor_start_time: None,
                     harness_session_id: None,
                     usage: UsageTotals::default(),
                 },
@@ -1318,7 +1801,7 @@ mod tests {
         )
         .unwrap_or_else(|error| panic!("task: {error}"));
 
-        run_supervisor(root.path(), &handle)
+        run_supervisor(root.path(), &handle, 1)
             .await
             .unwrap_or_else(|error| panic!("supervisor: {error}"));
         let delegator = Delegator::new(root.path(), "/does/not/run");
@@ -1375,13 +1858,14 @@ mod tests {
                     number: 1,
                     status: TaskStatus::Queued,
                     supervisor_pid: None,
+                    supervisor_start_time: None,
                     harness_session_id: None,
                     usage: UsageTotals::default(),
                 },
             },
         )
         .unwrap_or_else(|error| panic!("task: {error}"));
-        run_supervisor(root.path(), &handle)
+        run_supervisor(root.path(), &handle, 1)
             .await
             .unwrap_or_else(|error| panic!("supervisor: {error}"));
 
@@ -1410,13 +1894,14 @@ mod tests {
                     number: 1,
                     status: TaskStatus::Queued,
                     supervisor_pid: None,
+                    supervisor_start_time: None,
                     harness_session_id: None,
                     usage: UsageTotals::default(),
                 },
             },
         )
         .unwrap_or_else(|error| panic!("task: {error}"));
-        run_supervisor(root.path(), &handle)
+        run_supervisor(root.path(), &handle, 1)
             .await
             .unwrap_or_else(|error| panic!("supervisor: {error}"));
 
@@ -1463,6 +1948,7 @@ mod tests {
                     number: 1,
                     status: TaskStatus::Queued,
                     supervisor_pid: None,
+                    supervisor_start_time: None,
                     harness_session_id: None,
                     usage: UsageTotals::default(),
                 },
@@ -1472,7 +1958,7 @@ mod tests {
         let state_dir = root.path().to_path_buf();
         let supervisor_handle = handle.clone();
         let supervisor =
-            tokio::spawn(async move { run_supervisor(&state_dir, &supervisor_handle).await });
+            tokio::spawn(async move { run_supervisor(&state_dir, &supervisor_handle, 1).await });
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let live = Delegator::new(root.path(), "/does/not/run")
@@ -1513,6 +1999,7 @@ mod tests {
                     number,
                     status: TaskStatus::Succeeded,
                     supervisor_pid: None,
+                    supervisor_start_time: None,
                     harness_session_id: Some(format!("session-{number}")),
                     usage: UsageTotals {
                         cost: Some(UsageCost {
@@ -1542,6 +2029,7 @@ mod tests {
                     number: 1,
                     status: TaskStatus::Succeeded,
                     supervisor_pid: None,
+                    supervisor_start_time: None,
                     harness_session_id: Some("session-1".to_owned()),
                     usage: UsageTotals::default(),
                 },
@@ -1574,7 +2062,7 @@ mod tests {
             &handle,
             &fake_request(root.path(), "malformed"),
         );
-        run_supervisor(root.path(), &handle)
+        run_supervisor(root.path(), &handle, 1)
             .await
             .unwrap_or_else(|error| panic!("supervisor state: {error}"));
         let result: TaskResult =
@@ -1594,7 +2082,7 @@ mod tests {
             &handle,
             &fake_request(root.path(), "permission-request"),
         );
-        run_supervisor(root.path(), &handle)
+        run_supervisor(root.path(), &handle, 1)
             .await
             .unwrap_or_else(|error| panic!("supervisor: {error}"));
         let events =

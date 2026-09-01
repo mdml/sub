@@ -3,6 +3,18 @@
 use super::stop_reason::StopReason;
 use super::update::StreamUpdate;
 
+/// How a fresh ACP process opens the harness session for a prompt turn.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SessionStart {
+    /// Create a new harness session.
+    #[default]
+    New,
+    /// Resume an existing harness session without transcript replay.
+    Resume(String),
+    /// Load an existing harness session and accept bridge replay.
+    Load(String),
+}
+
 /// Token usage reported for one completed prompt turn.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnUsage {

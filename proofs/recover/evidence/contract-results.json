@@ -1,0 +1,13 @@
+{
+  "fake": {
+    "resume_succeeds": "pass",
+    "resume_refused": "pass",
+    "session_record_missing": "pass",
+    "load_replays_session_updates": "pass"
+  },
+  "real": {
+    "claude": { "version": "2.1.252", "bridge": "@agentclientprotocol/claude-agent-acp@0.70.0", "cross_process_resume": "pass" },
+    "codex": { "version": "0.151.0", "bridge": "@agentclientprotocol/codex-acp@1.6.2", "cross_process_resume": "pass" }
+  },
+  "fake_divergences": []
+}

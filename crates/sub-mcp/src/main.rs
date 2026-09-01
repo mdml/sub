@@ -1,4 +1,4 @@
-//! MCP stdio surface for launch, wait, and pinned bridge installation.
+//! MCP stdio surface for delegated-task controls and pinned bridge installation.
 
 use std::env;
 use std::io::{self, BufRead, Write};
@@ -38,11 +38,13 @@ fn adapter(harness: Harness, root: &Path, binary: &Path) -> Result<AdapterLaunch
             bridge: sub_adapter_claude::launch(root, binary).map_err(|error| error.to_string())?,
             session_meta: sub_adapter_claude::session_meta(),
             delegation_guard: sub_adapter_claude::DELEGATION_GUARD.to_owned(),
+            resume_mechanism: sub_adapter_claude::RESUME_MECHANISM,
         }),
         Harness::Codex => Ok(AdapterLaunch {
             bridge: sub_adapter_codex::launch(root, binary).map_err(|error| error.to_string())?,
             session_meta: sub_adapter_codex::session_meta(),
             delegation_guard: sub_adapter_codex::DELEGATION_GUARD.to_owned(),
+            resume_mechanism: sub_adapter_codex::RESUME_MECHANISM,
         }),
     }
 }
@@ -95,6 +97,17 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 .map_err(|error| error.to_string())?;
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
+        "sub_recover" => {
+            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
+            let handle = TaskHandle {
+                id: string_arg(args, "handle")?.to_owned(),
+            };
+            let executable = env::current_exe().map_err(|error| error.to_string())?;
+            let result = Delegator::new(root, executable)
+                .recover(&handle)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(result).map_err(|error| error.to_string())
+        }
         "sub_list" => {
             let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
             let executable = env::current_exe().map_err(|error| error.to_string())?;
@@ -122,6 +135,7 @@ fn tools() -> Value {
     json!({"tools":[
         {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle.","inputSchema":{"type":"object","required":["harness","prompt","cwd","binary","permission_mode"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_wait","description":"Wait up to a timeout for a delegated task result; re-wait with the same handle if still running.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":0},"state_dir":{"type":"string"}}}},
+        {"name":"sub_recover","description":"Start a new attempt that resumes an orphaned task's recorded harness session.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_list","description":"List delegated tasks by reading the state directory without contacting supervisors or harnesses.","inputSchema":{"type":"object","properties":{"state_dir":{"type":"string"}}}},
         {"name":"sub_inspect","description":"Inspect one task's status, normalized events, cost, and tokens by reading the state directory.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_bridge_install","description":"Explicitly install one exact pinned ACP bridge and write its integrity manifest.","inputSchema":{"type":"object","required":["harness"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"state_dir":{"type":"string"}}}}
@@ -188,15 +202,24 @@ async fn main() {
             .get(1)
             .cloned()
             .ok_or_else(|| "supervisor handle missing".to_owned());
+        let number = args
+            .get(2)
+            .ok_or_else(|| "supervisor attempt missing".to_owned())
+            .and_then(|value| value.parse::<u32>().map_err(|error| error.to_string()));
         let root = args
             .iter()
             .position(|arg| arg == "--state-dir")
             .and_then(|index| args.get(index + 1))
             .map(String::as_str);
-        match id.and_then(|id| default_state_dir(root).map(|root| (id, root))) {
-            Ok((id, root)) => sub_sdk::delegation::run_supervisor(&root, &TaskHandle { id })
-                .await
-                .map_err(|error| error.to_string()),
+        match id
+            .and_then(|id| number.map(|number| (id, number)))
+            .and_then(|(id, number)| default_state_dir(root).map(|root| (id, number, root)))
+        {
+            Ok((id, number, root)) => {
+                sub_sdk::delegation::run_supervisor(&root, &TaskHandle { id }, number)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
             Err(error) => Err(error),
         }
     } else if args
@@ -231,6 +254,7 @@ mod tests {
             [
                 "sub_launch",
                 "sub_wait",
+                "sub_recover",
                 "sub_list",
                 "sub_inspect",
                 "sub_bridge_install"
@@ -252,7 +276,7 @@ mod tests {
         let listed = respond(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}))
             .await
             .unwrap_or_else(|| panic!("response"));
-        assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(5));
+        assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(6));
         let missing = respond(json!({"jsonrpc":"2.0","id":4,"method":"unknown"}))
             .await
             .unwrap_or_else(|| panic!("response"));
@@ -276,6 +300,14 @@ mod tests {
         .err()
         .unwrap_or_else(|| panic!("wait error"));
         assert!(wait_error.contains("unknown task"));
+        let recover_error = call_tool(
+            "sub_recover",
+            &json!({"handle":"tsk_000000000000000000000000","state_dir":root_text}),
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("recover error"));
+        assert!(recover_error.contains("unknown task"));
         let install_error = call_tool(
             "sub_bridge_install",
             &json!({"harness":"cursor","state_dir":root_text}),

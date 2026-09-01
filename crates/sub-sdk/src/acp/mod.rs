@@ -13,10 +13,10 @@ pub mod session;
 pub mod stop_reason;
 pub mod update;
 
-pub use client::{AcpClient, PromptOptions, UpdateObserver};
+pub use client::{AcpClient, PromptOptions, SessionObserver, UpdateObserver};
 pub use config::AcpClientConfig;
 pub use error::AcpError;
 pub use launch::HarnessLaunch;
-pub use session::{PromptResult, SessionHandle, TurnUsage};
+pub use session::{PromptResult, SessionHandle, SessionStart, TurnUsage};
 pub use stop_reason::StopReason;
 pub use update::{StreamCost, StreamUpdate, StreamUpdateKind};

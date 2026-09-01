@@ -6,11 +6,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
-    NewSessionResponse, PermissionOption, PermissionOptionId, PermissionOptionKind, PromptRequest,
-    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, StopReason, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
+    AgentCapabilities, InitializeRequest, InitializeResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
+    PermissionOptionId, PermissionOptionKind, PromptRequest, PromptResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, ResumeSessionRequest,
+    ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, StopReason,
+    ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo, Responder, Stdio};
 
@@ -25,6 +27,10 @@ use crate::FakeHarnessError;
 /// # Errors
 ///
 /// Returns [`FakeHarnessError`] when fixtures cannot be loaded or the agent connection fails.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one ACP builder registers the fake's complete protocol surface"
+)]
 pub async fn run_stdio(
     scenarios_root: &Path,
     fixtures_root: &Path,
@@ -49,6 +55,38 @@ pub async fn run_stdio(
                             responder: Responder<InitializeResponse>,
                             _connection: ConnectionTo<Client>| {
                     responder.respond(state.initialize_response(&request))
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = Arc::clone(&state);
+                async move |request: ResumeSessionRequest,
+                            responder: Responder<ResumeSessionResponse>,
+                            _connection: ConnectionTo<Client>| {
+                    if matches!(state.behavior, ScenarioBehavior::ResumeRefused)
+                        || request.session_id.0.as_ref()
+                            != state.fixture.manifest.session.session_id
+                    {
+                        responder.respond_with_error(
+                            agent_client_protocol::Error::invalid_params()
+                                .data("fixture session unavailable"),
+                        )
+                    } else {
+                        responder.respond(ResumeSessionResponse::new())
+                    }
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = Arc::clone(&state);
+                async move |request: LoadSessionRequest,
+                            responder: Responder<LoadSessionResponse>,
+                            connection: ConnectionTo<Client>| {
+                    state.load_session(&request, responder, &connection)
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -97,7 +135,8 @@ pub async fn run_stdio(
                         | ScenarioBehavior::Replay
                         | ScenarioBehavior::IgnoreCancel
                         | ScenarioBehavior::DieMidStream { .. }
-                        | ScenarioBehavior::Malformed { .. } => {
+                        | ScenarioBehavior::Malformed { .. }
+                        | ScenarioBehavior::ResumeRefused => {
                             state.replay_prompt(request, responder, connection).await
                         }
                     }
@@ -155,6 +194,29 @@ impl SharedState {
         if notification.session_id.0.as_ref() == self.fixture.manifest.session.session_id {
             self.cancelled.store(true, Ordering::SeqCst);
         }
+    }
+
+    fn load_session(
+        &self,
+        request: &LoadSessionRequest,
+        responder: Responder<LoadSessionResponse>,
+        connection: &ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        if matches!(self.behavior, ScenarioBehavior::ResumeRefused)
+            || request.session_id.0.as_ref() != self.fixture.manifest.session.session_id
+        {
+            return responder.respond_with_error(
+                agent_client_protocol::Error::invalid_params().data("fixture session unavailable"),
+            );
+        }
+        for event in &self.fixture.events {
+            if event.kind == "session/update"
+                && let Some(value) = &event.notification
+            {
+                connection.send_notification(parse_notification(value)?)?;
+            }
+        }
+        responder.respond(LoadSessionResponse::new())
     }
 
     fn request_permission(

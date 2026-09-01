@@ -1,0 +1,16 @@
+{
+  "manager_exit": "killed after launch while attempt 1 was running",
+  "fresh_process_command": "sub wait $MANAGER_HANDLE --timeout-seconds 60 --state-dir $STATE_DIR",
+  "state": "complete",
+  "result": {
+    "status": "succeeded",
+    "summary": "Created [manager-death.txt]($WORK/manager-death.txt).",
+    "changed_files": ["$WORK/manager-death.txt"],
+    "artifacts": [
+      { "kind": "event_log", "location": "$STATE_DIR/tasks/$MANAGER_HANDLE/attempts/1/events.jsonl" },
+      { "kind": "supervisor_log", "location": "$STATE_DIR/tasks/$MANAGER_HANDLE/attempts/1/supervisor.log" },
+      { "kind": "native_session", "location": "$CODEX_HOME/sessions/2026/09/01/rollout-<timestamp>-01a05df8-ab12-7e13-99c0-8052424b202e.jsonl" }
+    ],
+    "harness_session_id": "01a05df8-ab12-7e13-99c0-8052424b202e"
+  }
+}

@@ -39,11 +39,13 @@ fn adapter(harness: Harness, root: &Path, binary: &Path) -> Result<AdapterLaunch
             bridge: sub_adapter_claude::launch(root, binary).map_err(|error| error.to_string())?,
             session_meta: sub_adapter_claude::session_meta(),
             delegation_guard: sub_adapter_claude::DELEGATION_GUARD.to_owned(),
+            resume_mechanism: sub_adapter_claude::RESUME_MECHANISM,
         }),
         Harness::Codex => Ok(AdapterLaunch {
             bridge: sub_adapter_codex::launch(root, binary).map_err(|error| error.to_string())?,
             session_meta: sub_adapter_codex::session_meta(),
             delegation_guard: sub_adapter_codex::DELEGATION_GUARD.to_owned(),
+            resume_mechanism: sub_adapter_codex::RESUME_MECHANISM,
         }),
     }
 }
@@ -54,6 +56,35 @@ fn parse_harness(value: &str) -> Result<Harness, String> {
         "codex" => Ok(Harness::Codex),
         _ => Err(format!("unsupported harness: {value}")),
     }
+}
+
+fn recover(args: &[String]) -> Result<(), String> {
+    let id = args
+        .get(1)
+        .ok_or_else(|| "usage: sub recover HANDLE [--state-dir PATH]".to_owned())?;
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let outcome = Delegator::new(state_dir(args)?, executable)
+        .recover(&TaskHandle { id: id.clone() })
+        .map_err(|error| error.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+async fn supervise(args: &[String]) -> Result<(), String> {
+    let id = args
+        .get(1)
+        .ok_or_else(|| "supervisor handle missing".to_owned())?;
+    let number = args
+        .get(2)
+        .ok_or_else(|| "supervisor attempt missing".to_owned())?
+        .parse::<u32>()
+        .map_err(|error| format!("invalid supervisor attempt: {error}"))?;
+    sub_sdk::delegation::run_supervisor(&state_dir(args)?, &TaskHandle { id: id.clone() }, number)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn run() -> Result<(), String> {
@@ -112,6 +143,7 @@ async fn run() -> Result<(), String> {
                 serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
             );
         }
+        Some("recover") => recover(&args)?,
         Some("list") => {
             let executable = env::current_exe().map_err(|error| error.to_string())?;
             let tasks = Delegator::new(state_dir(&args)?, executable)
@@ -135,16 +167,9 @@ async fn run() -> Result<(), String> {
                 serde_json::to_string_pretty(&task).map_err(|error| error.to_string())?
             );
         }
-        Some("__supervise") => {
-            let id = args
-                .get(1)
-                .ok_or_else(|| "supervisor handle missing".to_owned())?;
-            sub_sdk::delegation::run_supervisor(&state_dir(&args)?, &TaskHandle { id: id.clone() })
-                .await
-                .map_err(|error| error.to_string())?;
-        }
+        Some("__supervise") => supervise(&args).await?,
         Some("--version" | "-V") | None => println!("sub {}", sub_sdk::version()),
-        _ => return Err("usage: sub <bridge install|launch|wait|list|inspect>".to_owned()),
+        _ => return Err("usage: sub <bridge install|launch|wait|recover|list|inspect>".to_owned()),
     }
     Ok(())
 }

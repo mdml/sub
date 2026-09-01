@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use sub_sdk::acp::HarnessLaunch;
 use sub_sdk::bridge::{self, BridgeError, BridgeSpec};
+use sub_sdk::delegation::ResumeMechanism;
 
 /// Harness name this adapter supports.
 pub const HARNESS_NAME: &str = "claude";
@@ -13,6 +14,8 @@ pub const BRIDGE_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
 pub const BRIDGE_VERSION: &str = "0.70.0";
 /// Claude Code versions exercised by the real-harness contract suite.
 pub const VERIFIED_HARNESS_VERSIONS: &[&str] = &["2.1.246", "2.1.251", "2.1.252"];
+/// Claude's bridge reopens an existing session through ACP `session/resume`.
+pub const RESUME_MECHANISM: ResumeMechanism = ResumeMechanism::Resume;
 
 /// Bridge installation identity.
 pub const BRIDGE: BridgeSpec = BridgeSpec {

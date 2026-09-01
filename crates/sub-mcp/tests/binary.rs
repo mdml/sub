@@ -36,6 +36,7 @@ fn serves_initialize_and_tool_list_over_stdio() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("sub_launch"));
     assert!(stdout.contains("sub_wait"));
+    assert!(stdout.contains("sub_recover"));
 }
 
 #[test]
