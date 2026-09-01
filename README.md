@@ -2,26 +2,44 @@
 
 Give the coding agent you already use subagents from any supported coding harness, with one durable place to observe the delegated work and retrieve its result.
 
-`sub` is in pre-beta. Claude Code and Codex can install their pinned ACP bridges, launch one bounded child task under an independent supervisor, wait on the returned durable handle, independently observe task status and evidence, recover an orphaned harness session, and cancel a running child through CLI or MCP.
+`sub` is in pre-beta. Claude Code and Codex can be configured and onboarded, launch one bounded child task under an independent supervisor, wait on the returned durable handle, independently observe task status and evidence, recover an orphaned harness session, and cancel a running child through CLI or MCP.
 
 ## Status
 
 The four beta feature proofs pass: Delegate from a real Claude Code manager to a real Codex child, Observe through independent CLI and MCP processes, Recover through replacement-manager wait and replacement-supervisor session resume, and Control through cross-process cancellation. The composed delegate → observe → recover → cancel path also passes on one real task. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), [`docs/proofs/control.md`](docs/proofs/control.md), and [`docs/proofs/beta-path.md`](docs/proofs/beta-path.md).
 
-## Try launch, wait, observe, recover, and cancel
+## Configure and onboard
 
-Install each exact pinned bridge once. `npm` is required only for these explicit install commands.
+Create `$XDG_CONFIG_HOME/sub/sub.toml`, or `$HOME/.config/sub/sub.toml` when `XDG_CONFIG_HOME` is unset. `SUB_CONFIG` selects another path for tests. The beta schema contains only a state-directory override and harness binary, model, and permission-mode defaults:
 
-```sh
-cargo build -p sub-cli
-target/debug/sub bridge install claude
-target/debug/sub bridge install codex
+```toml
+state_dir = "/home/alice/.local/state/sub"
+
+[harnesses.claude]
+binary = "/home/alice/.local/bin/claude"
+permission_mode = "bypassPermissions"
+
+[harnesses.codex]
+binary = "/home/alice/.local/bin/codex"
+model = "gpt-5"
+permission_mode = "agent"
 ```
 
-Launch requires the child harness, bounded prompt, existing working directory, the user's harness binary, and a harness-native permission mode. It returns JSON immediately.
+Build both surfaces, then explicitly onboard only the requested manager harnesses. `npm` is required while onboarding installs each exact pinned bridge. The same action installs the `sub-delegation` manager skill and registers the adjacent `sub-mcp` binary in each named harness's user configuration.
 
 ```sh
-target/debug/sub launch --harness codex --cwd "$PWD" --prompt "Review the current change and report findings." --binary "$(command -v codex)" --permission-mode read-only
+cargo build -p sub-cli -p sub-mcp
+target/debug/sub onboard claude codex
+```
+
+Re-running onboarding repairs stale files or reports `unchanged`; it never configures an unnamed harness. `sub` uses each harness's existing authentication and never holds credentials. See [`docs/decisions/2026-09-01-onboarding-installation.md`](docs/decisions/2026-09-01-onboarding-installation.md).
+
+## Try launch, wait, observe, recover, and cancel
+
+With a configured harness, launch needs only the child harness, bounded prompt, and existing working directory. It returns JSON immediately.
+
+```sh
+target/debug/sub launch --harness codex --cwd "$PWD" --prompt "Review the current change and report findings."
 target/debug/sub wait tsk_REPLACE_WITH_HANDLE --timeout-seconds 30
 ```
 
@@ -32,7 +50,7 @@ target/debug/sub recover tsk_REPLACE_WITH_HANDLE
 target/debug/sub cancel tsk_REPLACE_WITH_HANDLE
 ```
 
-The MCP server binary is `target/debug/sub-mcp`; `sub_bridge_install`, `sub_launch`, `sub_wait`, `sub_recover`, and `sub_cancel` expose the same controls.
+Explicit `--binary`, `--model`, `--permission-mode`, and `--state-dir` values override `sub.toml`; the prior fully explicit launch form remains valid. No executable is guessed from `PATH`. The MCP server binary is `target/debug/sub-mcp`; `sub_bridge_install`, `sub_launch`, `sub_wait`, `sub_recover`, and `sub_cancel` expose the same controls and optional launch overrides.
 
 Observe from any process that can read the same state directory:
 

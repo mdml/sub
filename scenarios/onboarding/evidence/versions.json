@@ -1,0 +1,6 @@
+{
+  "claude": "2.1.252 (Claude Code)",
+  "codex": "codex-cli 0.151.0",
+  "claude_bridge": "@agentclientprotocol/claude-agent-acp@0.70.0",
+  "codex_bridge": "@agentclientprotocol/codex-acp@1.6.2"
+}

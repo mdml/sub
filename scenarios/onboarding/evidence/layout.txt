@@ -1,0 +1,7 @@
+$ROOT/sub.toml
+$CLAUDE_ROOT/config.json
+$CLAUDE_ROOT/skills/sub-delegation/SKILL.md
+$CODEX_ROOT/config.toml
+$CODEX_ROOT/skills/sub-delegation/SKILL.md
+$STATE_DIR/bridges/_agentclientprotocol_claude-agent-acp/0.70.0/sub-bridge-manifest.json
+$STATE_DIR/bridges/_agentclientprotocol_codex-acp/1.6.2/sub-bridge-manifest.json

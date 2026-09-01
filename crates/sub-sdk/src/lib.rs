@@ -9,6 +9,7 @@
 
 pub mod acp;
 pub mod bridge;
+pub mod config;
 pub mod delegation;
 
 /// The crate version, as compiled from `Cargo.toml`.

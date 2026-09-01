@@ -24,3 +24,5 @@ One file per repository-level decision, named `YYYY-MM-DD-<slug>.md`. Each state
 | 2026-09-01 | [Recovery attempts and bridge session resume](2026-09-01-recovery-resume-mechanics.md) |
 | 2026-09-01 | [Cross-process cancel request signalling](2026-09-01-cancel-request-signalling.md) |
 | 2026-09-01 | [Cancellation grace period and ignored harnesses](2026-09-01-cancel-grace-and-ignored-harness.md) |
+| 2026-09-01 | [`sub.toml` location and launch precedence](2026-09-01-sub-toml-location-and-precedence.md) |
+| 2026-09-01 | [Onboarding installation for Claude and Codex](2026-09-01-onboarding-installation.md) |

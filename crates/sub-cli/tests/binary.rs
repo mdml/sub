@@ -2,6 +2,22 @@
 
 use std::process::Command;
 
+#[cfg(unix)]
+fn fake_npm(root: &std::path::Path) -> String {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    let npm = root.join("npm");
+    fs::write(&npm, "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nfor name in codex-acp claude-agent-acp; do printf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/$name\"; chmod +x \"$prefix/node_modules/.bin/$name\"; done\n")
+        .unwrap_or_else(|error| panic!("npm: {error}"));
+    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755))
+        .unwrap_or_else(|error| panic!("permissions: {error}"));
+    format!(
+        "{}:{}",
+        root.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
 fn prepare_orphaned_task(root: &std::path::Path, handle: &str) {
     let attempt = root.join("tasks").join(handle).join("attempts/1");
     std::fs::create_dir_all(&attempt).unwrap_or_else(|error| panic!("mkdir: {error}"));
@@ -239,8 +255,11 @@ fn install_launch_and_wait_use_one_durable_shape() {
         if harness == "codex" {
             command.args(["--model", "test"]);
         }
+        command.args(["--state-dir"]).arg(root.path());
         let launch = command
-            .env("SUB_STATE_DIR", root.path())
+            .env_remove("SUB_CONFIG")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("HOME")
             .output()
             .unwrap_or_else(|error| panic!("launch: {error}"));
         assert!(
@@ -284,4 +303,143 @@ fn install_launch_and_wait_use_one_durable_shape() {
                 .is_some()
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn config_supplies_launch_values_and_explicit_arguments_win() {
+    let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let state = root.path().join("state");
+    let config = root.path().join("sub.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "state_dir = '{}'\n[harnesses.codex]\nbinary = '/bin/true'\nmodel = 'configured-model'\npermission_mode = 'configured-mode'\n",
+            state.display()
+        ),
+    )
+    .unwrap_or_else(|error| panic!("config: {error}"));
+    let binary = env!("CARGO_BIN_EXE_sub");
+    let path = fake_npm(root.path());
+    let install = Command::new(binary)
+        .args(["bridge", "install", "codex"])
+        .env("SUB_CONFIG", &config)
+        .env("PATH", &path)
+        .output()
+        .unwrap_or_else(|error| panic!("install: {error}"));
+    assert!(install.status.success());
+
+    for (extra, expected_binary, expected_model, expected_mode) in [
+        (
+            Vec::<&str>::new(),
+            "/bin/true",
+            "configured-model",
+            "configured-mode",
+        ),
+        (
+            vec![
+                "--binary",
+                "/bin/false",
+                "--model",
+                "explicit-model",
+                "--permission-mode",
+                "explicit-mode",
+            ],
+            "/bin/false",
+            "explicit-model",
+            "explicit-mode",
+        ),
+    ] {
+        let launch = Command::new(binary)
+            .args(["launch", "--harness", "codex", "--cwd"])
+            .arg(root.path())
+            .args(["--prompt", "bounded config probe"])
+            .args(extra)
+            .env("SUB_CONFIG", &config)
+            .output()
+            .unwrap_or_else(|error| panic!("launch: {error}"));
+        assert!(
+            launch.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launch.stderr)
+        );
+        let handle: serde_json::Value = serde_json::from_slice(&launch.stdout)
+            .unwrap_or_else(|error| panic!("launch json: {error}"));
+        let task = state
+            .join("tasks")
+            .join(handle["id"].as_str().unwrap_or_else(|| panic!("handle")))
+            .join("task.json");
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(task).unwrap_or_else(|error| panic!("task: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("task json: {error}"));
+        assert_eq!(persisted["params"]["harness_binary"], expected_binary);
+        assert_eq!(persisted["params"]["model"], expected_model);
+        assert_eq!(persisted["params"]["permission_mode"], expected_mode);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
+    let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let config = root.path().join("sub.toml");
+    let state = root.path().join("state");
+    std::fs::write(
+        &config,
+        format!(
+            "state_dir = '{}'\n[harnesses.claude]\nbinary = '/bin/true'\npermission_mode = 'bypassPermissions'\n[harnesses.codex]\nbinary = '/bin/true'\npermission_mode = 'agent'\n",
+            state.display()
+        ),
+    )
+    .unwrap_or_else(|error| panic!("config: {error}"));
+    let claude_config = root.path().join("claude/config.json");
+    let claude_skills = root.path().join("claude/skills");
+    let codex_config = root.path().join("codex/config.toml");
+    let codex_skills = root.path().join("codex/skills");
+    let binary = env!("CARGO_BIN_EXE_sub");
+    let path = fake_npm(root.path());
+    let run = |harnesses: &[&str]| {
+        Command::new(binary)
+            .arg("onboard")
+            .args(harnesses)
+            .env("SUB_CONFIG", &config)
+            .env("SUB_CLAUDE_CONFIG", &claude_config)
+            .env("SUB_CLAUDE_SKILLS_DIR", &claude_skills)
+            .env("SUB_CODEX_CONFIG", &codex_config)
+            .env("SUB_CODEX_SKILLS_DIR", &codex_skills)
+            .env("SUB_MCP_BINARY", "/bin/true")
+            .env("PATH", &path)
+            .output()
+            .unwrap_or_else(|error| panic!("onboard: {error}"))
+    };
+
+    let claude_only = run(&["claude"]);
+    assert!(claude_only.status.success());
+    assert!(claude_config.is_file());
+    assert!(claude_skills.join("sub-delegation/SKILL.md").is_file());
+    assert!(!codex_config.exists());
+    assert!(!codex_skills.exists());
+
+    let first_codex = run(&["codex"]);
+    assert!(first_codex.status.success());
+    let second = run(&["claude", "codex"]);
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&second.stdout).unwrap_or_else(|error| panic!("report: {error}"));
+    for harness in report.as_array().unwrap_or_else(|| panic!("array")) {
+        assert_eq!(harness["bridge"]["status"], "unchanged");
+        assert_eq!(harness["skill"]["status"], "unchanged");
+        assert_eq!(harness["mcp"]["status"], "unchanged");
+    }
+    assert!(codex_skills.join("sub-delegation/SKILL.md").is_file());
+    assert!(
+        std::fs::read_to_string(codex_config)
+            .unwrap_or_else(|error| panic!("codex config: {error}"))
+            .contains("[mcp_servers.sub]")
+    );
 }

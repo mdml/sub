@@ -13,6 +13,7 @@ tokio.workspace = true
 agent-client-protocol = { workspace = true, features = ["unstable_end_turn_token_usage"] }
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 sha2.workspace = true
 hex.workspace = true
 thiserror = "=2.0.20"

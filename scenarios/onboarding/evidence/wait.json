@@ -1,0 +1,14 @@
+{
+  "state": "complete",
+  "result": {
+    "status": "succeeded",
+    "summary": "I’ll create the single requested file with no other changes. Created [onboarding.txt]($WORK/onboarding.txt).",
+    "changed_files": ["$WORK/onboarding.txt"],
+    "artifacts": [
+      {"kind": "event_log", "location": "$STATE_DIR/tasks/tsk_<redacted>/attempts/1/events.jsonl"},
+      {"kind": "supervisor_log", "location": "$STATE_DIR/tasks/tsk_<redacted>/attempts/1/supervisor.log"},
+      {"kind": "native_session", "location": "$CODEX_HOME/sessions/2026/09/01/rollout-<redacted>.jsonl"}
+    ],
+    "harness_session_id": "<redacted>"
+  }
+}
