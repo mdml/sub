@@ -2,13 +2,13 @@
 
 Give the coding agent you already use subagents from any supported coding harness, with one durable place to observe the delegated work and retrieve its result.
 
-`sub` is in pre-beta. Claude Code and Codex can install their pinned ACP bridges, launch one bounded child task under an independent supervisor, wait on the returned durable handle, and independently observe task status, normalized events, reported cost, and reported tokens through CLI or MCP.
+`sub` is in pre-beta. Claude Code and Codex can install their pinned ACP bridges, launch one bounded child task under an independent supervisor, wait on the returned durable handle, independently observe task status and evidence, recover an orphaned harness session, and cancel a running child through CLI or MCP.
 
 ## Status
 
-Current proofs: Delegate passes from a real Claude Code manager to a real Codex child; Observe passes live and after completion on real Claude Code and Codex tasks through independent CLI and MCP processes; Recover passes both replacement-manager wait and replacement-supervisor session resume. Control remains a later proof. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), and [`CHANGELOG.md`](CHANGELOG.md).
+The four beta feature proofs pass: Delegate from a real Claude Code manager to a real Codex child, Observe through independent CLI and MCP processes, Recover through replacement-manager wait and replacement-supervisor session resume, and Control through cross-process cancellation. The composed delegate → observe → recover → cancel path also passes on one real task. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), [`docs/proofs/control.md`](docs/proofs/control.md), and [`docs/proofs/beta-path.md`](docs/proofs/beta-path.md).
 
-## Try launch, wait, and Observe
+## Try launch, wait, observe, recover, and cancel
 
 Install each exact pinned bridge once. `npm` is required only for these explicit install commands.
 
@@ -25,7 +25,14 @@ target/debug/sub launch --harness codex --cwd "$PWD" --prompt "Review the curren
 target/debug/sub wait tsk_REPLACE_WITH_HANDLE --timeout-seconds 30
 ```
 
-If wait returns `{"state":"running",...}`, call it again with the same handle. The MCP server binary is `target/debug/sub-mcp`; its `sub_bridge_install`, `sub_launch`, and `sub_wait` tools expose the same controls.
+If wait returns `{"state":"running",...}`, call it again with the same handle. If inspection reports `orphaned`, explicit recover creates the next attempt and resumes the recorded harness session. Cancel returns its delivery disposition immediately; observe or wait for the terminal result.
+
+```sh
+target/debug/sub recover tsk_REPLACE_WITH_HANDLE
+target/debug/sub cancel tsk_REPLACE_WITH_HANDLE
+```
+
+The MCP server binary is `target/debug/sub-mcp`; `sub_bridge_install`, `sub_launch`, `sub_wait`, `sub_recover`, and `sub_cancel` expose the same controls.
 
 Observe from any process that can read the same state directory:
 

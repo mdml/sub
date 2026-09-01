@@ -1,0 +1,10 @@
+{
+  "command": "sub_cancel",
+  "arguments": { "handle": "$HANDLE", "state_dir": "$STATE_DIR" },
+  "structuredContent": {
+    "handle": { "id": "$HANDLE" },
+    "attempt": 1,
+    "delivery": "already_finished"
+  },
+  "note": "The MCP call followed terminal wait and demonstrates the same CancelOutcome shape plus the too-late disposition."
+}

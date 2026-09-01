@@ -33,3 +33,5 @@ After `sub wait "$HANDLE" --timeout-seconds 60 --state-dir "$STATE_DIR"` complet
 Live CLI and MCP output report `status: running`, task-to-attempt linkage, `attempt_started`, and streamed activity without contacting or modifying the supervisor. Completed output reports `status: succeeded`, `attempt_finished`, and usage accumulated for the attempt and task. Claude reports USD cost and per-turn tokens. Codex reports per-turn tokens, while `usage_support.cost: false` and `usage.cost: null` state that its harness did not report cost. No event contains transcript text; the native transcript remains an artifact reference in the task result.
 
 Captured, scrubbed evidence is under [`../../proofs/observe/evidence/`](../../proofs/observe/evidence/). `live-cli.json` and `live-mcp.json` show independent running observations. `complete-cli-claude.json` and `complete-mcp-codex.json` show the two supported-usage combinations after completion. `contract-results.json` records the real-harness contract results and fake divergence check.
+
+This feature composes into the release-gating [beta path](beta-path.md).

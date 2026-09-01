@@ -1,0 +1,36 @@
+{
+  "cancel": {
+    "handle": { "id": "$HANDLE" },
+    "attempt": 2,
+    "delivery": "delivered"
+  },
+  "wait": {
+    "state": "complete",
+    "result": {
+      "status": "cancelled",
+      "summary": "I’ll resume the existing wait rather than restarting it, then create and verify the remaining file. The interrupted process no longer exists, but the first file’s timestamp shows 37 seconds already elapsed. I’m preserving that elapsed time and waiting only the remaining 263 seconds.",
+      "changed_files": [],
+      "artifacts": [
+        { "kind": "event_log", "location": "$STATE_DIR/tasks/$HANDLE/attempts/2/events.jsonl" },
+        { "kind": "supervisor_log", "location": "$STATE_DIR/tasks/$HANDLE/attempts/2/supervisor.log" },
+        { "kind": "native_session", "location": "$CODEX_HOME/sessions/YYYY/MM/DD/rollout-$SESSION_ID.jsonl" }
+      ],
+      "harness_session_id": "$SESSION_ID"
+    }
+  },
+  "inspect": {
+    "task_status": "cancelled",
+    "attempts": [
+      { "number": 1, "status": "orphaned", "harness_session_id": "$SESSION_ID" },
+      { "number": 2, "status": "cancelled", "harness_session_id": "$SESSION_ID", "usage": { "tokens": { "total_tokens": 16857 } } }
+    ],
+    "lifecycle_events": [
+      { "attempt": 1, "kind": "attempt_started" },
+      { "attempt": 1, "kind": "attempt_orphaned" },
+      { "attempt": 2, "kind": "attempt_started" },
+      { "attempt": 2, "kind": "attempt_resumed" },
+      { "attempt": 2, "kind": "attempt_cancelled", "harness_honored": true },
+      { "attempt": 2, "kind": "attempt_finished", "status": "cancelled" }
+    ]
+  }
+}

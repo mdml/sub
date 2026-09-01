@@ -24,6 +24,8 @@ The per-commit gate includes the behavioral contract suite (`crates/sub-sdk/test
 
 On 2026-08-31, real contract mode passed with Claude Code 2.1.251 through `@agentclientprotocol/claude-agent-acp` 0.70.0 and Codex CLI 0.151.0 through `@agentclientprotocol/codex-acp` 1.6.2. Both bridges were installed first by `sub` into a throwaway state directory. The contract entrypoint found no fake/real divergence, and separate full supervisor launch/wait runs succeeded through both adapters. The subsequent Delegate proof found that a Codex execute tool can create a file without an ACP edit location; result derivation and its tests now also recognize existing working-directory files linked from the streamed final Markdown.
 
+On 2026-09-01, real contract mode additionally exercised ACP cancellation after launch and cross-process resume. Claude Code 2.1.252 and Codex CLI 0.151.0 both returned the `cancelled` stop reason through their pinned bridges, with no fake/real divergence. The kernel suite separately covers supervisor-mediated honored and ignored cancellation plus already-finished and orphaned delivery dispositions.
+
 The coverage threshold is the same as the full gate's, so a change that passes here already meets `main`'s coverage requirement. Set `SUB_COVERAGE_MIN` to experiment locally; CI does not.
 
 ## The full gate: `scripts/verify.sh --full`

@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Explicit Control operations: SDK `Delegator::cancel`, CLI `sub cancel`, and MCP `sub_cancel`, with immediate `delivered`, `already_finished`, or `attempt_orphaned` dispositions for one task handle.
+- Supervisor-mediated ACP cancellation through durable per-attempt request markers, a five-second grace period, honest honored/ignored cancellation events, terminal partial results, and explicit rejection of recovery after cancellation.
+- Fake and real Claude/Codex cancellation contracts, the re-runnable Control proof, and the composed delegate → observe → recover → cancel beta-path proof with scrubbed evidence.
 - Explicit Recover controls: SDK `Delegator::recover`, CLI `sub recover`, and MCP `sub_recover`, which create attempt N+1 and resume an orphaned Claude or Codex harness session through a fresh detached supervisor.
 - Direct supervisor liveness evidence with PID-reuse protection on Linux, the distinct `orphaned` task status, resume lifecycle/failure events, sequential attempt observation, and task-level usage accumulation across attempts.
 - Fake-harness resume acceptance, refusal, missing-session coverage, real Claude/Codex cross-process resume contracts, and the two-leg Recover proof with scrubbed evidence.

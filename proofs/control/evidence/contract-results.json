@@ -1,0 +1,15 @@
+{
+  "fake": {
+    "protocol_cancel_honored": "pass",
+    "protocol_cancel_ignored": "pass",
+    "supervisor_cancel_honored": "pass",
+    "supervisor_cancel_ignored_after_grace": "pass",
+    "cancel_too_late": "pass",
+    "cancel_orphaned": "pass"
+  },
+  "real": {
+    "claude": { "version": "2.1.252", "bridge": "@agentclientprotocol/claude-agent-acp@0.70.0", "launch_resume_cancel": "pass" },
+    "codex": { "version": "0.151.0", "bridge": "@agentclientprotocol/codex-acp@1.6.2", "launch_resume_cancel": "pass" }
+  },
+  "fake_divergences": []
+}

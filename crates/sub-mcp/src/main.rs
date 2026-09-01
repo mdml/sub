@@ -108,6 +108,17 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 .map_err(|error| error.to_string())?;
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
+        "sub_cancel" => {
+            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
+            let handle = TaskHandle {
+                id: string_arg(args, "handle")?.to_owned(),
+            };
+            let executable = env::current_exe().map_err(|error| error.to_string())?;
+            let result = Delegator::new(root, executable)
+                .cancel(&handle)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(result).map_err(|error| error.to_string())
+        }
         "sub_list" => {
             let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
             let executable = env::current_exe().map_err(|error| error.to_string())?;
@@ -136,6 +147,7 @@ fn tools() -> Value {
         {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle.","inputSchema":{"type":"object","required":["harness","prompt","cwd","binary","permission_mode"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_wait","description":"Wait up to a timeout for a delegated task result; re-wait with the same handle if still running.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":0},"state_dir":{"type":"string"}}}},
         {"name":"sub_recover","description":"Start a new attempt that resumes an orphaned task's recorded harness session.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
+        {"name":"sub_cancel","description":"Request cancellation of one task's latest attempt and return the delivery disposition immediately.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_list","description":"List delegated tasks by reading the state directory without contacting supervisors or harnesses.","inputSchema":{"type":"object","properties":{"state_dir":{"type":"string"}}}},
         {"name":"sub_inspect","description":"Inspect one task's status, normalized events, cost, and tokens by reading the state directory.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_bridge_install","description":"Explicitly install one exact pinned ACP bridge and write its integrity manifest.","inputSchema":{"type":"object","required":["harness"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"state_dir":{"type":"string"}}}}
@@ -255,6 +267,7 @@ mod tests {
                 "sub_launch",
                 "sub_wait",
                 "sub_recover",
+                "sub_cancel",
                 "sub_list",
                 "sub_inspect",
                 "sub_bridge_install"
@@ -276,7 +289,7 @@ mod tests {
         let listed = respond(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}))
             .await
             .unwrap_or_else(|| panic!("response"));
-        assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(6));
+        assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(7));
         let missing = respond(json!({"jsonrpc":"2.0","id":4,"method":"unknown"}))
             .await
             .unwrap_or_else(|| panic!("response"));
@@ -308,6 +321,14 @@ mod tests {
         .err()
         .unwrap_or_else(|| panic!("recover error"));
         assert!(recover_error.contains("unknown task"));
+        let cancel_error = call_tool(
+            "sub_cancel",
+            &json!({"handle":"tsk_000000000000000000000000","state_dir":root_text}),
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("cancel error"));
+        assert!(cancel_error.contains("unknown task"));
         let install_error = call_tool(
             "sub_bridge_install",
             &json!({"harness":"cursor","state_dir":root_text}),

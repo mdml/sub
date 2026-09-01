@@ -59,3 +59,5 @@ Call `sub_inspect` from a fresh `sub-mcp` process with the same handle and state
 The fake behavioral contract covers successful cross-process resume, bridge refusal, and a missing persisted session ID. The fake `session/load` implementation replays the fixture stream on load, matching the ACP boundary evidence for replay-loading bridges. Real-harness contract mode created a session in one bridge process and resumed the same ID in a fresh process for Claude and Codex; both passed, and neither disagreed with the fake behavior exercised for its resume mechanism.
 
 Captured, scrubbed evidence is under [`../../proofs/recover/evidence/`](../../proofs/recover/evidence/). Paths use `$STATE_DIR`, `$WORK`, and `$CODEX_HOME`; the killed supervisor PID and machine identity are omitted. `manager-death.json` captures the fresh-process wait, `orphaned-cli.json` captures direct liveness detection, `recover-cli.json` captures attempt creation, `complete-cli.json` and `complete-mcp.json` capture session lineage and usage, and `contract-results.json` records fake and real contract outcomes.
+
+This feature composes into the release-gating [beta path](beta-path.md).

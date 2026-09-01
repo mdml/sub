@@ -1,4 +1,4 @@
-//! Durable delegated-task launch, supervision, and wait semantics.
+//! Durable delegated-task launch, supervision, observation, recovery, cancellation, and wait semantics.
 
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
@@ -13,9 +13,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::acp::{
-    AcpClient, AcpClientConfig, HarnessLaunch, PromptOptions, SessionObserver, SessionStart,
-    StopReason, StreamUpdate, StreamUpdateKind, TurnUsage, UpdateObserver,
+    AcpClient, AcpClientConfig, CancellationOptions, HarnessLaunch, PromptOptions, SessionObserver,
+    SessionStart, StopReason, StreamUpdate, StreamUpdateKind, TurnUsage, UpdateObserver,
 };
+
+#[cfg(test)]
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(1);
+#[cfg(not(test))]
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -281,7 +286,15 @@ pub enum TaskEventKind {
         reason: ResumeFailureReason,
     },
     /// An attempt was cancelled.
-    AttemptCancelled,
+    AttemptCancelled {
+        /// Whether the harness acknowledged ACP cancellation within the grace period.
+        harness_honored: bool,
+    },
+    /// Recovery was rejected before a new attempt because the task is terminal.
+    AttemptRecoveryRejected {
+        /// Stable terminal reason.
+        reason: RecoveryRejectionReason,
+    },
     /// An attempt reached a terminal state.
     AttemptFinished {
         /// Terminal attempt status.
@@ -309,6 +322,37 @@ pub enum ResumeFailureReason {
     SessionRecordMissing,
     /// The fresh bridge process refused or failed to reopen the recorded session.
     HarnessRefused,
+}
+
+/// Why a terminal task cannot be recovered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryRejectionReason {
+    /// Cancellation is a final delegated-task outcome.
+    Cancelled,
+}
+
+/// Immediate disposition of a cancel request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CancelDelivery {
+    /// The live supervisor can observe the durable request marker.
+    Delivered,
+    /// The latest attempt already has a terminal status.
+    AlreadyFinished,
+    /// The latest attempt lost its supervisor.
+    AttemptOrphaned,
+}
+
+/// Immediate response from explicit cancellation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelOutcome {
+    /// Stable delegated-task handle.
+    pub handle: TaskHandle,
+    /// Latest attempt targeted by the request.
+    pub attempt: u32,
+    /// What the kernel did with the request.
+    pub delivery: CancelDelivery,
 }
 
 /// Immediate response from explicit recovery.
@@ -517,7 +561,18 @@ impl Delegator {
         let prior_number = latest_attempt_number(&self.state_dir, handle)?;
         let prior_paths = TaskPaths::for_attempt(&self.state_dir, handle, prior_number);
         let prior: ExecutionAttempt = read_json(&prior_paths.state)?;
-        if effective_status(&prior) != TaskStatus::Orphaned {
+        let prior_status = effective_status(&prior);
+        if prior_status == TaskStatus::Cancelled {
+            append_event(
+                &prior_paths.events,
+                handle,
+                prior_number,
+                TaskEventKind::AttemptRecoveryRejected {
+                    reason: RecoveryRejectionReason::Cancelled,
+                },
+            )?;
+        }
+        if prior_status != TaskStatus::Orphaned {
             return Err(DelegationError::NotOrphaned(handle.id.clone()));
         }
         append_event(
@@ -572,6 +627,42 @@ impl Delegator {
         Ok(RecoverOutcome {
             handle: handle.clone(),
             attempt: number,
+        })
+    }
+
+    /// Request cancellation of the latest attempt and return without waiting for completion.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown handle or unreadable persisted state.
+    pub fn cancel(&self, handle: &TaskHandle) -> Result<CancelOutcome, DelegationError> {
+        validate_handle(handle)?;
+        let initial_paths = TaskPaths::new(&self.state_dir, handle);
+        if !initial_paths.task.is_file() || !initial_paths.state.is_file() {
+            return Err(DelegationError::UnknownHandle(handle.id.clone()));
+        }
+        let attempt = latest_attempt_number(&self.state_dir, handle)?;
+        let paths = TaskPaths::for_attempt(&self.state_dir, handle, attempt);
+        let state: ExecutionAttempt = read_json(&paths.state)?;
+        let delivery = match effective_status(&state) {
+            TaskStatus::Orphaned => CancelDelivery::AttemptOrphaned,
+            TaskStatus::Succeeded | TaskStatus::Failed | TaskStatus::Cancelled => {
+                CancelDelivery::AlreadyFinished
+            }
+            TaskStatus::Queued | TaskStatus::Running => {
+                OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(false)
+                    .open(&paths.cancel_request)?
+                    .sync_all()?;
+                CancelDelivery::Delivered
+            }
+        };
+        Ok(CancelOutcome {
+            handle: handle.clone(),
+            attempt,
+            delivery,
         })
     }
 
@@ -726,7 +817,7 @@ pub async fn run_supervisor(
             artifacts: base_artifacts(&paths),
             harness_session_id: None,
         };
-        return finish_attempt(&paths, handle, number, &result, None);
+        return finish_attempt(&paths, handle, number, &result, None, None);
     }
     let prompt = if is_resume {
         format!(
@@ -759,6 +850,7 @@ pub async fn run_supervisor(
                 model: request.params.model,
                 session_meta: Some(request.adapter.session_meta),
                 session_start,
+                cancellation: Some(cancellation_options(&paths)),
                 ..PromptOptions::default()
             },
             Some(observer),
@@ -777,8 +869,26 @@ pub async fn run_supervisor(
         )?;
     }
 
+    let cancellation_honored = outcome
+        .as_ref()
+        .ok()
+        .and_then(|(_, result)| result.cancellation_honored);
     let (result, tokens) = derive_task_result(outcome, &paths, harness, &cwd);
-    finish_attempt(&paths, handle, number, &result, tokens)
+    finish_attempt(
+        &paths,
+        handle,
+        number,
+        &result,
+        tokens,
+        cancellation_honored,
+    )
+}
+
+fn cancellation_options(paths: &TaskPaths) -> CancellationOptions {
+    CancellationOptions {
+        request_path: paths.cancel_request.clone(),
+        grace_period: CANCEL_GRACE_PERIOD,
+    }
 }
 
 fn session_observer(
@@ -898,6 +1008,7 @@ fn finish_attempt(
     number: u32,
     result: &TaskResult,
     tokens: Option<TurnUsage>,
+    cancellation_honored: Option<bool>,
 ) -> Result<(), DelegationError> {
     let current: ExecutionAttempt = read_json(&paths.state)?;
     let mut usage = current.usage.clone();
@@ -941,7 +1052,9 @@ fn finish_attempt(
             &paths.events,
             handle,
             number,
-            TaskEventKind::AttemptCancelled,
+            TaskEventKind::AttemptCancelled {
+                harness_honored: cancellation_honored.unwrap_or(true),
+            },
         )?;
     }
     append_event(
@@ -1368,6 +1481,7 @@ struct TaskPaths {
     events: PathBuf,
     result: PathBuf,
     supervisor_log: PathBuf,
+    cancel_request: PathBuf,
 }
 
 impl TaskPaths {
@@ -1386,6 +1500,7 @@ impl TaskPaths {
             events: attempt.join("events.jsonl"),
             result: attempt.join("result.json"),
             supervisor_log: attempt.join("supervisor.log"),
+            cancel_request: attempt.join("cancel.request"),
             attempt,
         }
     }
@@ -1679,6 +1794,115 @@ mod tests {
     }
 
     #[test]
+    fn cancel_reports_orphaned_without_writing_a_request() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_131313131313131313131313".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-minimal");
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        let attempt = ExecutionAttempt {
+            number: 1,
+            status: TaskStatus::Running,
+            supervisor_pid: Some(u32::MAX),
+            supervisor_start_time: Some(1),
+            harness_session_id: Some("fixture-session".to_owned()),
+            usage: UsageTotals::default(),
+        };
+        write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params,
+                attempt,
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+
+        let outcome = Delegator::new(root.path(), "/does/not/run")
+            .cancel(&handle)
+            .unwrap_or_else(|error| panic!("cancel: {error}"));
+        assert_eq!(outcome.delivery, CancelDelivery::AttemptOrphaned);
+        assert!(!paths.cancel_request.is_file());
+    }
+
+    #[test]
+    fn cancel_reports_too_late_for_a_terminal_attempt() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_141414141414141414141414".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-minimal");
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        let attempt = ExecutionAttempt {
+            number: 1,
+            status: TaskStatus::Succeeded,
+            supervisor_pid: None,
+            supervisor_start_time: None,
+            harness_session_id: Some("fixture-session".to_owned()),
+            usage: UsageTotals::default(),
+        };
+        write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params,
+                attempt,
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+
+        let outcome = Delegator::new(root.path(), "/does/not/run")
+            .cancel(&handle)
+            .unwrap_or_else(|error| panic!("cancel: {error}"));
+        assert_eq!(outcome.delivery, CancelDelivery::AlreadyFinished);
+        assert!(!paths.cancel_request.is_file());
+    }
+
+    #[test]
+    fn recover_rejects_cancelled_task_and_records_why() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_151515151515151515151515".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-minimal");
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        let attempt = ExecutionAttempt {
+            number: 1,
+            status: TaskStatus::Cancelled,
+            supervisor_pid: None,
+            supervisor_start_time: None,
+            harness_session_id: Some("fixture-session".to_owned()),
+            usage: UsageTotals::default(),
+        };
+        write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params,
+                attempt,
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+
+        let error = Delegator::new(root.path(), "/does/not/run")
+            .recover(&handle)
+            .err()
+            .unwrap_or_else(|| panic!("cancelled task must not recover"));
+        assert!(matches!(error, DelegationError::NotOrphaned(_)));
+        let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            TaskEventKind::AttemptRecoveryRejected {
+                reason: RecoveryRejectionReason::Cancelled
+            }
+        )));
+    }
+
+    #[test]
     fn empty_list_and_unknown_inspect_are_explicit() {
         let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
         let delegator = Delegator::new(root.path(), "/does/not/run");
@@ -1832,7 +2056,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn supervisor_records_harness_cancellation() {
+    async fn supervisor_delivers_cancel_and_preserves_partial_result() {
         let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
         let handle = TaskHandle {
             id: "tsk_454545454545454545454545".to_owned(),
@@ -1842,24 +2066,116 @@ mod tests {
             &handle,
             &fake_request(root.path(), "cancel_honored"),
         );
+        let request: SupervisorRequest =
+            read_json(&paths.request).unwrap_or_else(|error| panic!("request: {error}"));
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params,
+                attempt: ExecutionAttempt {
+                    number: 1,
+                    status: TaskStatus::Queued,
+                    supervisor_pid: Some(std::process::id()),
+                    supervisor_start_time: process_start_time(std::process::id()),
+                    harness_session_id: None,
+                    usage: UsageTotals::default(),
+                },
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
 
-        run_supervisor(root.path(), &handle, 1)
+        let state_dir = root.path().to_path_buf();
+        let supervisor_handle = handle.clone();
+        let supervisor =
+            tokio::spawn(async move { run_supervisor(&state_dir, &supervisor_handle, 1).await });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let outcome = Delegator::new(root.path(), "/does/not/run")
+            .cancel(&handle)
+            .unwrap_or_else(|error| panic!("cancel: {error}"));
+        assert_eq!(outcome.delivery, CancelDelivery::Delivered);
+        supervisor
             .await
+            .unwrap_or_else(|error| panic!("join: {error}"))
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+
+        let result: TaskResult =
+            read_json(&paths.result).unwrap_or_else(|error| panic!("result: {error}"));
+        assert_eq!(result.status, TaskStatus::Cancelled);
+        assert!(!result.summary.is_empty());
+        assert!(result.harness_session_id.is_some());
+        assert!(
+            result
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == ArtifactKind::NativeSession)
+        );
+        let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            TaskEventKind::AttemptCancelled {
+                harness_honored: true
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            TaskEventKind::AttemptFinished {
+                status: TaskStatus::Cancelled
+            }
+        )));
+    }
+
+    #[tokio::test]
+    async fn supervisor_bounds_an_ignored_cancel() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_464646464646464646464646".to_owned(),
+        };
+        let paths = prepare_supervisor(
+            root.path(),
+            &handle,
+            &fake_request(root.path(), "ignore-cancel"),
+        );
+        let request: SupervisorRequest =
+            read_json(&paths.request).unwrap_or_else(|error| panic!("request: {error}"));
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params,
+                attempt: ExecutionAttempt {
+                    number: 1,
+                    status: TaskStatus::Queued,
+                    supervisor_pid: Some(std::process::id()),
+                    supervisor_start_time: process_start_time(std::process::id()),
+                    harness_session_id: None,
+                    usage: UsageTotals::default(),
+                },
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+        let state_dir = root.path().to_path_buf();
+        let supervisor_handle = handle.clone();
+        let supervisor =
+            tokio::spawn(async move { run_supervisor(&state_dir, &supervisor_handle, 1).await });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let outcome = Delegator::new(root.path(), "/does/not/run")
+            .cancel(&handle)
+            .unwrap_or_else(|error| panic!("cancel: {error}"));
+        assert_eq!(outcome.delivery, CancelDelivery::Delivered);
+        supervisor
+            .await
+            .unwrap_or_else(|error| panic!("join: {error}"))
             .unwrap_or_else(|error| panic!("supervisor: {error}"));
 
         let result: TaskResult =
             read_json(&paths.result).unwrap_or_else(|error| panic!("result: {error}"));
         assert_eq!(result.status, TaskStatus::Cancelled);
         let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event.kind, TaskEventKind::AttemptCancelled))
-        );
         assert!(events.iter().any(|event| matches!(
             event.kind,
-            TaskEventKind::AttemptFinished {
-                status: TaskStatus::Cancelled
+            TaskEventKind::AttemptCancelled {
+                harness_honored: false
             }
         )));
     }
@@ -2317,5 +2633,107 @@ mod tests {
             activity_kind(StreamUpdateKind::ToolCall, true),
             Some(ActivityKind::SubagentObserved)
         );
+    }
+
+    #[test]
+    fn liveness_rejects_missing_process_identity() {
+        let mut attempt = ExecutionAttempt {
+            number: 1,
+            status: TaskStatus::Running,
+            supervisor_pid: None,
+            supervisor_start_time: None,
+            harness_session_id: None,
+            usage: UsageTotals::default(),
+        };
+        assert!(!supervisor_is_alive(&attempt));
+        attempt.supervisor_pid = Some(std::process::id());
+        assert!(!supervisor_is_alive(&attempt));
+    }
+
+    #[test]
+    fn handle_validation_rejects_wrong_length_and_case() {
+        for id in ["tsk_1234", "tsk_AAAAAAAAAAAAAAAAAAAAAAAA"] {
+            assert!(matches!(
+                validate_handle(&TaskHandle { id: id.to_owned() }),
+                Err(DelegationError::InvalidParams(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn event_reader_skips_blanks_and_tolerates_only_an_incomplete_tail() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let path = root.path().join("events.jsonl");
+        let valid = serde_json::to_string(&TaskEvent {
+            timestamp_unix_ms: 1,
+            task_id: "tsk_111111111111111111111111".to_owned(),
+            attempt: 1,
+            kind: TaskEventKind::AttemptStarted,
+        })
+        .unwrap_or_else(|error| panic!("event: {error}"));
+        fs::write(&path, format!("\n{valid}\n{{\"incomplete\""))
+            .unwrap_or_else(|error| panic!("write: {error}"));
+        assert_eq!(
+            read_events(&path)
+                .unwrap_or_else(|error| panic!("read: {error}"))
+                .len(),
+            1
+        );
+        fs::write(&path, "not json\n").unwrap_or_else(|error| panic!("write: {error}"));
+        assert!(matches!(read_events(&path), Err(DelegationError::Json(_))));
+    }
+
+    #[test]
+    fn attempt_reader_skips_directories_without_state() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_171717171717171717171717".to_owned(),
+        };
+        fs::create_dir_all(
+            root.path()
+                .join("tasks")
+                .join(&handle.id)
+                .join("attempts/1"),
+        )
+        .unwrap_or_else(|error| panic!("mkdir: {error}"));
+        let (attempts, events, usage) =
+            read_attempts(root.path(), &handle).unwrap_or_else(|error| panic!("attempts: {error}"));
+        assert!(attempts.is_empty());
+        assert!(events.is_empty());
+        assert_eq!(usage, UsageTotals::default());
+    }
+
+    #[test]
+    fn task_usage_rejects_paths_without_required_ancestry() {
+        assert!(matches!(
+            read_task_usage(Path::new("/")),
+            Err(DelegationError::InvalidParams(_))
+        ));
+        assert!(matches!(
+            read_task_usage(Path::new("task")),
+            Err(DelegationError::InvalidParams(_))
+        ));
+    }
+
+    #[test]
+    fn usage_does_not_merge_different_currencies() {
+        let mut total = UsageTotals {
+            cost: Some(UsageCost {
+                amount: 1.0,
+                currency: "USD".to_owned(),
+            }),
+            tokens: None,
+        };
+        add_usage(
+            &mut total,
+            &UsageTotals {
+                cost: Some(UsageCost {
+                    amount: 2.0,
+                    currency: "EUR".to_owned(),
+                }),
+                tokens: None,
+            },
+        );
+        assert_eq!(total.cost.as_ref().map(|cost| cost.amount), Some(1.0));
     }
 }

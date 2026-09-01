@@ -1,6 +1,6 @@
 //! ACP v1 client over stdio.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,6 +28,8 @@ pub struct PromptOptions {
     pub timeout: Option<Duration>,
     /// Send `session/cancel` after this delay once the prompt starts.
     pub cancel_after: Option<Duration>,
+    /// Watch this durable request marker and bound the harness's cancellation grace period.
+    pub cancellation: Option<CancellationOptions>,
     /// Harness-native ACP mode identifier applied before prompting.
     pub permission_mode: Option<String>,
     /// Harness-native model identifier applied before prompting.
@@ -36,6 +38,15 @@ pub struct PromptOptions {
     pub session_meta: Option<serde_json::Value>,
     /// Create, resume, or replay-load the harness session.
     pub session_start: SessionStart,
+}
+
+/// Supervisor-owned cancellation signal for one prompt turn.
+#[derive(Debug, Clone)]
+pub struct CancellationOptions {
+    /// Durable marker created by another process to request cancellation.
+    pub request_path: PathBuf,
+    /// Maximum time allowed for the harness to acknowledge `session/cancel`.
+    pub grace_period: Duration,
 }
 
 /// Thread-safe callback invoked for each normalized stream update.
@@ -125,6 +136,7 @@ impl AcpClient {
         let cwd = cwd.as_ref().to_path_buf();
         let prompt = prompt.to_owned();
         let cancel_after = options.cancel_after;
+        let cancellation = options.cancellation.clone();
         let client_name = self.config.client_name.clone();
         let agent = AcpAgent::new(self.launch.clone().into_acp_config());
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
@@ -248,10 +260,30 @@ impl AcpClient {
                     });
                 }
 
-                let response = connection
-                    .send_request(PromptRequest::new(session_id, vec![prompt.into()]))
-                    .block_task()
-                    .await?;
+                let prompt_request = connection
+                    .send_request(PromptRequest::new(session_id.clone(), vec![prompt.into()]))
+                    .block_task();
+                tokio::pin!(prompt_request);
+                let (response, cancellation_honored) = if let Some(cancellation) = cancellation {
+                    tokio::select! {
+                        response = &mut prompt_request => (Some(response?), None),
+                        () = wait_for_cancel_request(&cancellation.request_path) => {
+                            connection.send_notification(
+                                agent_client_protocol::schema::v1::CancelNotification::new(session_id),
+                            )?;
+                            match tokio::time::timeout(cancellation.grace_period, &mut prompt_request).await {
+                                Ok(response) => {
+                                    let response = response?;
+                                    let honored = StopReason::from(response.stop_reason) == StopReason::Cancelled;
+                                    (Some(response), Some(honored))
+                                }
+                                Err(_) => (None, Some(false)),
+                            }
+                        }
+                    }
+                } else {
+                    (Some(prompt_request.await?), None)
+                };
 
                 let mut updates = Vec::new();
                 let mut final_text = String::new();
@@ -266,10 +298,13 @@ impl AcpClient {
                 let turn_result = (
                     handle,
                     PromptResult {
-                        stop_reason: StopReason::from(response.stop_reason),
+                        stop_reason: response.as_ref().map_or(StopReason::Cancelled, |response| {
+                            StopReason::from(response.stop_reason)
+                        }),
                         updates,
                         final_text,
-                        usage: response.usage.map(Into::into),
+                        usage: response.and_then(|response| response.usage.map(Into::into)),
+                        cancellation_honored,
                     },
                 );
 
@@ -283,6 +318,12 @@ impl AcpClient {
             .map_err(|error| AcpError::protocol(&error))?;
 
         result_rx.await.map_err(|_| AcpError::StreamEnded)
+    }
+}
+
+async fn wait_for_cancel_request(path: &Path) {
+    while !path.is_file() {
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 
@@ -309,6 +350,7 @@ mod tests {
         let options = PromptOptions::default();
         assert!(options.timeout.is_none());
         assert!(options.cancel_after.is_none());
+        assert!(options.cancellation.is_none());
     }
 
     fn sample_permission_request() -> RequestPermissionRequest {
