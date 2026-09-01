@@ -1,0 +1,4 @@
+{
+  "claude": {"test": "real_harness_mode_entrypoint", "passed": 1, "failed": 0},
+  "codex": {"test": "real_harness_mode_entrypoint", "passed": 1, "failed": 0}
+}

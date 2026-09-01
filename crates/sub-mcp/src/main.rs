@@ -6,16 +6,32 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use sub_sdk::config::SubConfig;
 use sub_sdk::delegation::{AdapterLaunch, Delegator, Harness, LaunchParams, TaskHandle};
 
-fn default_state_dir(value: Option<&str>) -> Result<PathBuf, String> {
+fn default_state_dir(value: Option<&str>, config: &SubConfig) -> Result<PathBuf, String> {
     if let Some(value) = value {
         return Ok(PathBuf::from(value));
+    }
+    if let Some(value) = &config.state_dir {
+        return Ok(value.clone());
     }
     env::var_os("SUB_STATE_DIR")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| Path::new(&home).join(".sub")))
         .ok_or_else(|| "HOME is unset; provide state_dir".to_owned())
+}
+
+fn config() -> Result<sub_sdk::config::LoadedConfig, String> {
+    match sub_sdk::config::load() {
+        Ok(config) => Ok(config),
+        Err(sub_sdk::config::ConfigError::NoConfigHome) => Ok(sub_sdk::config::LoadedConfig {
+            config: SubConfig::default(),
+            path: PathBuf::new(),
+            exists: false,
+        }),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn string_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str, String> {
@@ -30,6 +46,39 @@ fn parse_harness(value: &str) -> Result<Harness, String> {
         "codex" => Ok(Harness::Codex),
         _ => Err(format!("unsupported harness: {value}")),
     }
+}
+
+fn launch_params(args: &Value, config: &SubConfig) -> Result<LaunchParams, String> {
+    let harness = parse_harness(string_arg(args, "harness")?)?;
+    let defaults = config.harness(harness);
+    let harness_binary = args
+        .get("binary")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .or_else(|| defaults.map(|entry| entry.binary.clone()))
+        .ok_or_else(|| {
+            "binary is required when the harness is not configured in sub.toml".to_owned()
+        })?;
+    let permission_mode = args
+        .get("permission_mode")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| defaults.and_then(|entry| entry.permission_mode.clone()))
+        .ok_or_else(|| {
+            "permission_mode is required when the harness has no default in sub.toml".to_owned()
+        })?;
+    Ok(LaunchParams {
+        harness,
+        prompt: string_arg(args, "prompt")?.to_owned(),
+        cwd: PathBuf::from(string_arg(args, "cwd")?),
+        harness_binary,
+        model: args
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| defaults.and_then(|entry| entry.model.clone())),
+        permission_mode,
+    })
 }
 
 fn adapter(harness: Harness, root: &Path, binary: &Path) -> Result<AdapterLaunch, String> {
@@ -49,40 +98,40 @@ fn adapter(harness: Harness, root: &Path, binary: &Path) -> Result<AdapterLaunch
     }
 }
 
+fn tool_state_dir(args: &Value, config: &SubConfig) -> Result<PathBuf, String> {
+    default_state_dir(args.get("state_dir").and_then(Value::as_str), config)
+}
+
+fn install_bridge_tool(args: &Value, config: &SubConfig) -> Result<Value, String> {
+    let harness = string_arg(args, "harness")?;
+    let root = tool_state_dir(args, config)?;
+    let binary = match harness {
+        "claude" => sub_adapter_claude::install_bridge(&root),
+        "codex" => sub_adapter_codex::install_bridge(&root),
+        _ => return Err(format!("unsupported harness: {harness}")),
+    }
+    .map_err(|error| error.to_string())?;
+    Ok(json!({"bridge_binary": binary}))
+}
+
+fn launch_tool(args: &Value, config: &SubConfig) -> Result<Value, String> {
+    let root = tool_state_dir(args, config)?;
+    let params = launch_params(args, config)?;
+    let prepared = adapter(params.harness, &root, &params.harness_binary)?;
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let handle = Delegator::new(root, executable)
+        .launch(params, prepared)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(handle).map_err(|error| error.to_string())
+}
+
 async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
+    let loaded = config()?;
     match name {
-        "sub_bridge_install" => {
-            let harness = string_arg(args, "harness")?;
-            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
-            let binary = match harness {
-                "claude" => sub_adapter_claude::install_bridge(&root),
-                "codex" => sub_adapter_codex::install_bridge(&root),
-                _ => return Err(format!("unsupported harness: {harness}")),
-            }
-            .map_err(|error| error.to_string())?;
-            Ok(json!({"bridge_binary": binary}))
-        }
-        "sub_launch" => {
-            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
-            let harness = parse_harness(string_arg(args, "harness")?)?;
-            let harness_binary = PathBuf::from(string_arg(args, "binary")?);
-            let params = LaunchParams {
-                harness,
-                prompt: string_arg(args, "prompt")?.to_owned(),
-                cwd: PathBuf::from(string_arg(args, "cwd")?),
-                harness_binary: harness_binary.clone(),
-                model: args.get("model").and_then(Value::as_str).map(str::to_owned),
-                permission_mode: string_arg(args, "permission_mode")?.to_owned(),
-            };
-            let prepared = adapter(harness, &root, &harness_binary)?;
-            let executable = env::current_exe().map_err(|error| error.to_string())?;
-            let handle = Delegator::new(root, executable)
-                .launch(params, prepared)
-                .map_err(|error| error.to_string())?;
-            serde_json::to_value(handle).map_err(|error| error.to_string())
-        }
+        "sub_bridge_install" => install_bridge_tool(args, &loaded.config),
+        "sub_launch" => launch_tool(args, &loaded.config),
         "sub_wait" => {
-            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
+            let root = tool_state_dir(args, &loaded.config)?;
             let seconds = args
                 .get("timeout_seconds")
                 .and_then(Value::as_u64)
@@ -98,7 +147,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_recover" => {
-            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
+            let root = tool_state_dir(args, &loaded.config)?;
             let handle = TaskHandle {
                 id: string_arg(args, "handle")?.to_owned(),
             };
@@ -109,7 +158,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_cancel" => {
-            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
+            let root = tool_state_dir(args, &loaded.config)?;
             let handle = TaskHandle {
                 id: string_arg(args, "handle")?.to_owned(),
             };
@@ -120,7 +169,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_list" => {
-            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
+            let root = tool_state_dir(args, &loaded.config)?;
             let executable = env::current_exe().map_err(|error| error.to_string())?;
             let result = Delegator::new(root, executable)
                 .list()
@@ -128,7 +177,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_inspect" => {
-            let root = default_state_dir(args.get("state_dir").and_then(Value::as_str))?;
+            let root = tool_state_dir(args, &loaded.config)?;
             let handle = TaskHandle {
                 id: string_arg(args, "handle")?.to_owned(),
             };
@@ -144,7 +193,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
 
 fn tools() -> Value {
     json!({"tools":[
-        {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle.","inputSchema":{"type":"object","required":["harness","prompt","cwd","binary","permission_mode"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
+        {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle. Configured harness defaults supply omitted binary, model, and permission mode.","inputSchema":{"type":"object","required":["harness","prompt","cwd"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_wait","description":"Wait up to a timeout for a delegated task result; re-wait with the same handle if still running.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":0},"state_dir":{"type":"string"}}}},
         {"name":"sub_recover","description":"Start a new attempt that resumes an orphaned task's recorded harness session.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_cancel","description":"Request cancellation of one task's latest attempt and return the delivery disposition immediately.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
@@ -223,10 +272,14 @@ async fn main() {
             .position(|arg| arg == "--state-dir")
             .and_then(|index| args.get(index + 1))
             .map(String::as_str);
+        let loaded = config();
         match id
             .and_then(|id| number.map(|number| (id, number)))
-            .and_then(|(id, number)| default_state_dir(root).map(|root| (id, number, root)))
-        {
+            .and_then(|(id, number)| {
+                loaded.and_then(|loaded| {
+                    default_state_dir(root, &loaded.config).map(|root| (id, number, root))
+                })
+            }) {
             Ok((id, number, root)) => {
                 sub_sdk::delegation::run_supervisor(&root, &TaskHandle { id }, number)
                     .await
@@ -342,6 +395,22 @@ mod tests {
             .err()
             .unwrap_or_else(|| panic!("unknown error"));
         assert!(unknown_error.contains("unknown tool"));
+        let missing_binary = call_tool(
+            "sub_launch",
+            &json!({"harness":"codex","prompt":"probe","cwd":root_text}),
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("missing binary"));
+        assert!(missing_binary.contains("binary is required"));
+        let missing_permission = call_tool(
+            "sub_launch",
+            &json!({"harness":"codex","prompt":"probe","cwd":root_text,"binary":"/bin/true"}),
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("missing permission"));
+        assert!(missing_permission.contains("permission_mode is required"));
         for harness in ["claude", "codex"] {
             let args = json!({"harness":harness,"prompt":"probe","cwd":root_text,"binary":std::env::current_exe().unwrap_or_else(|error| panic!("exe: {error}")),"permission_mode":"agent","state_dir":root_text});
             let error = call_tool("sub_launch", &args)

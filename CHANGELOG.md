@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Beta-minimum `sub.toml` discovery with configured state directory and per-harness binary, model, and permission-mode defaults shared by CLI and MCP launch; explicit arguments retain precedence.
+- Idempotent `sub onboard <claude|codex>...` for pinned bridge installation, the `sub-delegation` manager skill, and user-level MCP registration, with per-harness action reports and throwaway-root overrides.
+- Unit and integration coverage for config discovery, launch precedence, scoped onboarding, repair/idempotence, and matching CLI/MCP `LaunchParams`.
+- Re-runnable, non-gating configure-and-onboard scenario with scrubbed evidence, a real config-only Codex launch, and real Claude/Codex contract results.
 - Explicit Control operations: SDK `Delegator::cancel`, CLI `sub cancel`, and MCP `sub_cancel`, with immediate `delivered`, `already_finished`, or `attempt_orphaned` dispositions for one task handle.
 - Supervisor-mediated ACP cancellation through durable per-attempt request markers, a five-second grace period, honest honored/ignored cancellation events, terminal partial results, and explicit rejection of recovery after cancellation.
 - Fake and real Claude/Codex cancellation contracts, the re-runnable Control proof, and the composed delegate → observe → recover → cancel beta-path proof with scrubbed evidence.

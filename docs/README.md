@@ -13,4 +13,5 @@ Product intent, decided boundaries, beta scope, and the proofs that gate release
 | [`nightlies/`](nightlies/README.md) | The project-specific harness-compatibility nightly definition. |
 | [`spikes/`](spikes/) | Spike reports. Evidence only; the mental model says what was decided. |
 | [`proofs/`](proofs/) | Re-runnable feature-proof scenarios; captured evidence lives separately under the repository's top-level `proofs/`. |
+| [`scenarios/`](scenarios/) | Re-runnable non-gating product scenarios; scrubbed evidence lives under the repository's top-level `scenarios/`. |
 | [`release.md`](release.md) | How releases will be built, signed, and published. |
