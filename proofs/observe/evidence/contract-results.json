@@ -1,0 +1,13 @@
+{
+  "claude": {
+    "result": "pass",
+    "cost": "reported",
+    "tokens": "reported"
+  },
+  "codex": {
+    "result": "pass",
+    "cost": "not_reported_by_harness",
+    "tokens": "reported"
+  },
+  "fake_divergences": []
+}

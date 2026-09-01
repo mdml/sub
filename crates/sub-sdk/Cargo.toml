@@ -10,7 +10,7 @@ homepage.workspace = true
 
 [dependencies]
 tokio.workspace = true
-agent-client-protocol.workspace = true
+agent-client-protocol = { workspace = true, features = ["unstable_end_turn_token_usage"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

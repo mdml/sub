@@ -50,6 +50,10 @@ fn supervisor_mode_rejects_missing_handle() {
 
 #[cfg(unix)]
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one stdio session verifies all matching MCP task controls"
+)]
 fn tools_install_launch_and_wait_over_stdio() {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -115,6 +119,29 @@ fn tools_install_launch_and_wait_over_stdio() {
         .read_line(&mut line)
         .unwrap_or_else(|error| panic!("read: {error}"));
     assert!(line.contains("failed"));
+    line.clear();
+    writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"sub_list","arguments":{"state_dir":state}}})).unwrap_or_else(|error| panic!("write: {error}"));
+    stdin
+        .flush()
+        .unwrap_or_else(|error| panic!("flush: {error}"));
+    stdout
+        .read_line(&mut line)
+        .unwrap_or_else(|error| panic!("read: {error}"));
+    assert!(line.contains(&handle));
+    line.clear();
+    writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"sub_inspect","arguments":{"handle":handle,"state_dir":state}}})).unwrap_or_else(|error| panic!("write: {error}"));
+    stdin
+        .flush()
+        .unwrap_or_else(|error| panic!("flush: {error}"));
+    stdout
+        .read_line(&mut line)
+        .unwrap_or_else(|error| panic!("read: {error}"));
+    let inspection: serde_json::Value =
+        serde_json::from_str(&line).unwrap_or_else(|error| panic!("inspect json: {error}"));
+    assert_eq!(
+        inspection["result"]["structuredContent"]["task"]["handle"]["id"],
+        handle
+    );
     line.clear();
     writeln!(stdin, "{}", serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sub_launch","arguments":{"harness":"claude","prompt":"probe","cwd":state,"binary":"/bin/true","permission_mode":"default"}}})).unwrap_or_else(|error| panic!("write: {error}"));
     stdin

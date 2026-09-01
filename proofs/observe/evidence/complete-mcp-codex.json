@@ -1,0 +1,34 @@
+{
+  "tool": "sub_inspect",
+  "isError": false,
+  "structuredContent": {
+    "task": {
+      "handle": { "id": "$CODEX_HANDLE" },
+      "harness": "codex",
+      "status": "succeeded",
+      "usage_support": { "cost": false, "tokens": true },
+      "usage": {
+        "cost": null,
+        "tokens": {
+          "total_tokens": 16746,
+          "input_tokens": 575,
+          "output_tokens": 43,
+          "thought_tokens": 0,
+          "cached_read_tokens": 16128,
+          "cached_write_tokens": null
+        }
+      }
+    },
+    "terminal_events": [
+      {
+        "timestamp_unix_ms": 1788280938593,
+        "task_id": "$CODEX_HANDLE",
+        "attempt": 1,
+        "kind": "usage_accumulated",
+        "attempt_usage": { "cost": null, "tokens": { "total_tokens": 16746, "input_tokens": 575, "output_tokens": 43, "thought_tokens": 0, "cached_read_tokens": 16128, "cached_write_tokens": null } },
+        "task_usage": { "cost": null, "tokens": { "total_tokens": 16746, "input_tokens": 575, "output_tokens": 43, "thought_tokens": 0, "cached_read_tokens": 16128, "cached_write_tokens": null } }
+      },
+      { "timestamp_unix_ms": 1788280938593, "task_id": "$CODEX_HANDLE", "attempt": 1, "kind": "attempt_finished", "status": "succeeded" }
+    ]
+  }
+}

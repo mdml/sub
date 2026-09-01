@@ -12,7 +12,7 @@ pub const BRIDGE_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
 /// Exact pinned bridge version.
 pub const BRIDGE_VERSION: &str = "0.70.0";
 /// Claude Code versions exercised by the real-harness contract suite.
-pub const VERIFIED_HARNESS_VERSIONS: &[&str] = &["2.1.246", "2.1.251"];
+pub const VERIFIED_HARNESS_VERSIONS: &[&str] = &["2.1.246", "2.1.251", "2.1.252"];
 
 /// Bridge installation identity.
 pub const BRIDGE: BridgeSpec = BridgeSpec {

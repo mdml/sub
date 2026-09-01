@@ -16,3 +16,10 @@ session_id = "01a0409f-ada4-76c2-8c7a-68ef4d888a3b"
 [prompt]
 stop_reason = "end_turn"
 replay_timing = false
+
+[prompt.usage]
+total_tokens = 16749
+input_tokens = 1410
+output_tokens = 235
+thought_tokens = 47
+cached_read_tokens = 15104

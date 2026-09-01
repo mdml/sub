@@ -54,6 +54,7 @@ async fn launch_and_stream_consumption_minimal() {
         "expected message chunks in the stream"
     );
     assert!(result.final_text.contains("Hello"));
+    assert_eq!(result.usage, None, "minimal fixture reports no turn usage");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -75,6 +76,12 @@ async fn launch_and_stream_consumption_recorded_codex_fixture() {
         "recorded codex fixture should replay many updates, got {}",
         result.updates.len()
     );
+    let usage = result
+        .usage
+        .unwrap_or_else(|| panic!("recorded codex fixture should report per-turn usage"));
+    assert_eq!(usage.total_tokens, 16_749);
+    assert_eq!(usage.input_tokens, 1_410);
+    assert_eq!(usage.output_tokens, 235);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -223,4 +230,28 @@ async fn real_harness_mode_entrypoint() {
     .unwrap_or_else(|error| panic!("real harness prompt turn: {error}"));
 
     assert_eq!(result.stop_reason, StopReason::EndTurn);
+    match harness.real_name() {
+        Some("claude") => {
+            assert!(
+                result.usage.is_some(),
+                "claude should report per-turn tokens"
+            );
+            assert!(
+                result.updates.iter().any(|update| update.cost.is_some()),
+                "claude should stream cumulative cost"
+            );
+        }
+        Some("codex") => {
+            assert!(
+                result.usage.is_some(),
+                "codex should report per-turn tokens"
+            );
+            assert!(
+                result.updates.iter().all(|update| update.cost.is_none()),
+                "codex should not report cost"
+            );
+        }
+        Some(other) => panic!("real harness outside Observe scope: {other}"),
+        None => unreachable!("real-harness entrypoint selected a fake"),
+    }
 }

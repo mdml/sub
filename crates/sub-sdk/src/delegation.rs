@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 use crate::acp::{
     AcpClient, AcpClientConfig, HarnessLaunch, PromptOptions, StopReason, StreamUpdate,
-    UpdateObserver,
+    StreamUpdateKind, TurnUsage, UpdateObserver,
 };
 
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -27,6 +27,62 @@ pub enum Harness {
     Claude,
     /// `OpenAI Codex`.
     Codex,
+}
+
+impl Harness {
+    fn usage_support(self) -> UsageSupport {
+        match self {
+            Self::Claude => UsageSupport::claude(),
+            Self::Codex => UsageSupport::codex(),
+        }
+    }
+}
+
+/// Whether a harness is known to report each usage measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageSupport {
+    /// The harness reports cumulative monetary cost.
+    pub cost: bool,
+    /// The harness reports per-turn token usage.
+    pub tokens: bool,
+}
+
+impl UsageSupport {
+    /// Claude bridge support verified by the ACP boundary proof.
+    #[must_use]
+    pub const fn claude() -> Self {
+        Self {
+            cost: true,
+            tokens: true,
+        }
+    }
+
+    /// Codex bridge support verified by the ACP boundary proof.
+    #[must_use]
+    pub const fn codex() -> Self {
+        Self {
+            cost: false,
+            tokens: true,
+        }
+    }
+}
+
+/// Monetary cost reported by a harness.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageCost {
+    /// Numeric amount in the reported currency.
+    pub amount: f64,
+    /// ISO 4217 currency code.
+    pub currency: String,
+}
+
+/// Usage accumulated by `sub`; missing measurements are never replaced by zero.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct UsageTotals {
+    /// Latest cumulative cost, or absent when not reported.
+    pub cost: Option<UsageCost>,
+    /// Sum of per-turn token usage, or absent when not reported.
+    pub tokens: Option<TurnUsage>,
 }
 
 /// Opaque identifier returned by launch and accepted by every task control.
@@ -65,7 +121,7 @@ pub struct DelegatedTask {
 }
 
 /// One process invocation of a harness under a delegated task.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionAttempt {
     /// Attempt number, always `1` in the beta.
     pub number: u32,
@@ -75,6 +131,9 @@ pub struct ExecutionAttempt {
     pub supervisor_pid: Option<u32>,
     /// Vendor-owned session identifier once session creation succeeds.
     pub harness_session_id: Option<String>,
+    /// Usage accumulated for this attempt.
+    #[serde(default)]
+    pub usage: UsageTotals,
 }
 
 /// Adapter-prepared launch data consumed by the shared ACP client layer.
@@ -126,7 +185,7 @@ pub struct ArtifactReference {
 }
 
 /// Bounded handoff derived from the child's stream and stop reason.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskResult {
     /// Derived terminal status.
     pub status: TaskStatus,
@@ -141,7 +200,7 @@ pub struct TaskResult {
 }
 
 /// Outcome of a bounded wait call.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum WaitOutcome {
     /// The task did not reach a terminal state before the timeout.
@@ -156,15 +215,121 @@ pub enum WaitOutcome {
     },
 }
 
+/// A small normalized activity category that does not copy transcript content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityKind {
+    /// Assistant output arrived.
+    Message,
+    /// Agent reasoning arrived.
+    Thought,
+    /// A tool call started.
+    ToolCall,
+    /// A tool call changed state.
+    ToolCallUpdate,
+    /// A plan changed.
+    Plan,
+    /// Session metadata changed.
+    SessionInfo,
+    /// Available commands changed.
+    AvailableCommands,
+    /// A permission request was denied by `sub`.
+    PermissionDenied,
+    /// A tool title indicated forbidden nested delegation.
+    SubagentObserved,
+    /// An unrecognized ACP update arrived.
+    Other,
+}
+
+/// Stable event vocabulary owned by `sub`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TaskEventKind {
+    /// A task was linked to its initial attempt.
+    TaskCreated,
+    /// A new attempt started.
+    AttemptStarted,
+    /// A harness session was resumed in a replacement attempt.
+    AttemptResumed,
+    /// An attempt was cancelled.
+    AttemptCancelled,
+    /// An attempt reached a terminal state.
+    AttemptFinished {
+        /// Terminal attempt status.
+        status: TaskStatus,
+    },
+    /// Normalized activity arrived without transcript content.
+    Activity {
+        /// Normalized activity category.
+        activity: ActivityKind,
+    },
+    /// Cost or tokens changed for the attempt and task.
+    UsageAccumulated {
+        /// Accumulated usage for this attempt.
+        attempt_usage: Box<UsageTotals>,
+        /// Accumulated usage across the task's attempts.
+        task_usage: Box<UsageTotals>,
+    },
+}
+
 /// One append-only event record written by the supervisor.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskEvent {
     /// Unix time in milliseconds.
     pub timestamp_unix_ms: u128,
-    /// Stable normalized event name.
-    pub kind: String,
-    /// Stream detail when present.
-    pub update: Option<StreamUpdate>,
+    /// Task linked to this attempt.
+    pub task_id: String,
+    /// Attempt number within the task.
+    pub attempt: u32,
+    /// Typed normalized event payload.
+    #[serde(flatten)]
+    pub kind: TaskEventKind,
+}
+
+/// Compact task state returned by list and embedded by inspect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskOverview {
+    /// Stable task handle.
+    pub handle: TaskHandle,
+    /// Child harness.
+    pub harness: Harness,
+    /// Latest task lifecycle state.
+    pub status: TaskStatus,
+    /// Known reporting support for the harness.
+    pub usage_support: UsageSupport,
+    /// Usage accumulated across attempts.
+    pub usage: UsageTotals,
+}
+
+/// Response shape for listing delegated tasks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskList {
+    /// Tasks ordered by opaque handle for deterministic output.
+    pub tasks: Vec<TaskOverview>,
+}
+
+/// One attempt included in task inspection.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AttemptObservation {
+    /// Attempt number.
+    pub number: u32,
+    /// Latest lifecycle status.
+    pub status: TaskStatus,
+    /// Vendor-owned session identity, when known.
+    pub harness_session_id: Option<String>,
+    /// Usage accumulated for this attempt.
+    pub usage: UsageTotals,
+}
+
+/// Full read-only observation of one task.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskInspection {
+    /// Task-level status and accumulated usage.
+    pub task: TaskOverview,
+    /// Attempts contributing to the task totals.
+    pub attempts: Vec<AttemptObservation>,
+    /// Normalized append-only events across attempts.
+    pub events: Vec<TaskEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +402,7 @@ impl Delegator {
             status: TaskStatus::Queued,
             supervisor_pid: None,
             harness_session_id: None,
+            usage: UsageTotals::default(),
         };
         write_json(
             &paths.task,
@@ -248,7 +414,7 @@ impl Delegator {
         )?;
         write_json(&paths.request, &SupervisorRequest { params, adapter })?;
         write_json(&paths.state, &attempt)?;
-        append_event(&paths.events, "task_created", None)?;
+        append_event(&paths.events, &handle, 1, TaskEventKind::TaskCreated)?;
         let log = OpenOptions::new()
             .create(true)
             .append(true)
@@ -268,6 +434,7 @@ impl Delegator {
                 status: TaskStatus::Queued,
                 supervisor_pid: Some(child.id()),
                 harness_session_id: None,
+                usage: UsageTotals::default(),
             },
         )?;
         Ok(handle)
@@ -304,6 +471,61 @@ impl Delegator {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+
+    /// List every delegated task readable from this state directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when persisted task state cannot be read.
+    pub fn list(&self) -> Result<TaskList, DelegationError> {
+        let root = self.state_dir.join("tasks");
+        if !root.is_dir() {
+            return Ok(TaskList { tasks: Vec::new() });
+        }
+        let mut handles = fs::read_dir(root)?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .map(|id| TaskHandle { id })
+            .filter(|handle| validate_handle(handle).is_ok())
+            .collect::<Vec<_>>();
+        handles.sort_by(|left, right| left.id.cmp(&right.id));
+        let tasks = handles
+            .iter()
+            .map(|handle| self.inspect(handle).map(|inspection| inspection.task))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(TaskList { tasks })
+    }
+
+    /// Inspect one task without contacting its supervisor or harness.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown handle or unreadable persisted state.
+    pub fn inspect(&self, handle: &TaskHandle) -> Result<TaskInspection, DelegationError> {
+        validate_handle(handle)?;
+        let paths = TaskPaths::new(&self.state_dir, handle);
+        if !paths.task.is_file() || !paths.state.is_file() {
+            return Err(DelegationError::UnknownHandle(handle.id.clone()));
+        }
+        let persisted: DelegatedTask = read_json(&paths.task)?;
+        let (attempts, events, usage) = read_attempts(&self.state_dir, handle)?;
+        let latest = attempts
+            .last()
+            .ok_or_else(|| DelegationError::UnknownHandle(handle.id.clone()))?;
+        let overview = TaskOverview {
+            handle: persisted.handle,
+            harness: persisted.params.harness,
+            status: latest.status,
+            usage_support: persisted.params.harness.usage_support(),
+            usage,
+        };
+        Ok(TaskInspection {
+            task: overview,
+            attempts,
+            events,
+        })
+    }
 }
 
 fn supervisor_command(executable: &Path) -> Command {
@@ -328,27 +550,19 @@ pub async fn run_supervisor(state_dir: &Path, handle: &TaskHandle) -> Result<(),
     validate_handle(handle)?;
     let paths = TaskPaths::new(state_dir, handle);
     let request: SupervisorRequest = read_json(&paths.request)?;
-    write_json(
-        &paths.state,
-        &ExecutionAttempt {
-            number: 1,
-            status: TaskStatus::Running,
-            supervisor_pid: Some(std::process::id()),
-            harness_session_id: None,
-        },
-    )?;
-    append_event(&paths.events, "attempt_started", None)?;
+    let running = ExecutionAttempt {
+        number: 1,
+        status: TaskStatus::Running,
+        supervisor_pid: Some(std::process::id()),
+        harness_session_id: None,
+        usage: UsageTotals::default(),
+    };
+    write_json(&paths.state, &running)?;
+    append_event(&paths.events, handle, 1, TaskEventKind::AttemptStarted)?;
 
-    let events = Arc::new(Mutex::new(paths.events.clone()));
-    let observer: UpdateObserver = Arc::new(move |update| {
-        if let Ok(path) = events.lock() {
-            let subagent_observed = looks_like_subagent(&update);
-            let _ = append_event(&path, "stream_update", Some(update));
-            if subagent_observed {
-                let _ = append_event(&path, "subagent_observed", None);
-            }
-        }
-    });
+    let observer = update_observer(&paths, handle, running);
+    let harness = request.params.harness;
+    let cwd = request.params.cwd.clone();
     let prompt = format!(
         "{}\n\n{}",
         request.params.prompt, request.adapter.delegation_guard
@@ -368,43 +582,122 @@ pub async fn run_supervisor(state_dir: &Path, handle: &TaskHandle) -> Result<(),
         )
         .await;
 
-    let (result, terminal_event) = match outcome {
-        Ok((session, prompt_result)) => {
-            let status = status_from_stop(prompt_result.stop_reason);
-            let changed_files = derive_changed_files(
-                &prompt_result.updates,
-                &prompt_result.final_text,
-                &request.params.cwd,
-            );
-            let artifacts = artifacts(
-                &paths,
-                request.params.harness,
-                &request.params.cwd,
-                &session.session_id,
-            );
-            (
-                TaskResult {
-                    status,
-                    summary: prompt_result.final_text.trim().to_owned(),
-                    changed_files,
-                    artifacts,
-                    harness_session_id: Some(session.session_id),
-                },
-                "attempt_finished",
-            )
+    let (result, tokens) = derive_task_result(outcome, &paths, harness, &cwd);
+    finish_attempt(&paths, handle, &result, tokens)
+}
+
+fn update_observer(
+    paths: &TaskPaths,
+    handle: &TaskHandle,
+    running: ExecutionAttempt,
+) -> UpdateObserver {
+    let observer_state = Arc::new(Mutex::new(ObserverState {
+        events: paths.events.clone(),
+        state: paths.state.clone(),
+        task_root: paths.task_root.clone(),
+        handle: handle.clone(),
+        attempt: running,
+        last_activity: None,
+    }));
+    Arc::new(move |update| {
+        if let Ok(mut state) = observer_state.lock() {
+            let subagent_observed = looks_like_subagent(&update);
+            if let Some(cost) = &update.cost {
+                state.attempt.usage.cost = Some(UsageCost {
+                    amount: cost.amount,
+                    currency: cost.currency.clone(),
+                });
+                let _ = write_json(&state.state, &state.attempt);
+                let usage = state.attempt.usage.clone();
+                let task_usage =
+                    read_task_usage(&state.task_root).unwrap_or_else(|_| usage.clone());
+                let _ = append_event(
+                    &state.events,
+                    &state.handle,
+                    1,
+                    TaskEventKind::UsageAccumulated {
+                        attempt_usage: Box::new(usage),
+                        task_usage: Box::new(task_usage),
+                    },
+                );
+            }
+            if let Some(activity) = activity_kind(update.kind, subagent_observed)
+                && state.last_activity != Some(activity)
+            {
+                state.last_activity = Some(activity);
+                let _ = append_event(
+                    &state.events,
+                    &state.handle,
+                    1,
+                    TaskEventKind::Activity { activity },
+                );
+            }
         }
+    })
+}
+
+fn derive_task_result(
+    outcome: Result<(crate::acp::SessionHandle, crate::acp::PromptResult), crate::acp::AcpError>,
+    paths: &TaskPaths,
+    harness: Harness,
+    cwd: &Path,
+) -> (TaskResult, Option<TurnUsage>) {
+    match outcome {
+        Ok((session, prompt_result)) => (
+            TaskResult {
+                status: status_from_stop(prompt_result.stop_reason),
+                summary: prompt_result.final_text.trim().to_owned(),
+                changed_files: derive_changed_files(
+                    &prompt_result.updates,
+                    &prompt_result.final_text,
+                    cwd,
+                ),
+                artifacts: artifacts(paths, harness, cwd, &session.session_id),
+                harness_session_id: Some(session.session_id),
+            },
+            prompt_result.usage,
+        ),
         Err(error) => (
             TaskResult {
                 status: TaskStatus::Failed,
                 summary: error.to_string(),
                 changed_files: Vec::new(),
-                artifacts: base_artifacts(&paths),
+                artifacts: base_artifacts(paths),
                 harness_session_id: None,
             },
-            "attempt_failed",
+            None,
         ),
-    };
-    append_event(&paths.events, terminal_event, None)?;
+    }
+}
+
+fn finish_attempt(
+    paths: &TaskPaths,
+    handle: &TaskHandle,
+    result: &TaskResult,
+    tokens: Option<TurnUsage>,
+) -> Result<(), DelegationError> {
+    let current: ExecutionAttempt = read_json(&paths.state)?;
+    let mut usage = current.usage.clone();
+    usage.tokens = tokens;
+    if usage.tokens.is_some() {
+        write_json(
+            &paths.state,
+            &ExecutionAttempt {
+                usage: usage.clone(),
+                ..current.clone()
+            },
+        )?;
+        let task_usage = read_task_usage(&paths.task_root)?;
+        append_event(
+            &paths.events,
+            handle,
+            1,
+            TaskEventKind::UsageAccumulated {
+                attempt_usage: Box::new(usage.clone()),
+                task_usage: Box::new(task_usage),
+            },
+        )?;
+    }
     write_json(&paths.result, &result)?;
     write_json(
         &paths.state,
@@ -413,9 +706,48 @@ pub async fn run_supervisor(state_dir: &Path, handle: &TaskHandle) -> Result<(),
             status: result.status,
             supervisor_pid: Some(std::process::id()),
             harness_session_id: result.harness_session_id.clone(),
+            usage,
+        },
+    )?;
+    if result.status == TaskStatus::Cancelled {
+        append_event(&paths.events, handle, 1, TaskEventKind::AttemptCancelled)?;
+    }
+    append_event(
+        &paths.events,
+        handle,
+        1,
+        TaskEventKind::AttemptFinished {
+            status: result.status,
         },
     )?;
     Ok(())
+}
+
+struct ObserverState {
+    events: PathBuf,
+    state: PathBuf,
+    task_root: PathBuf,
+    handle: TaskHandle,
+    attempt: ExecutionAttempt,
+    last_activity: Option<ActivityKind>,
+}
+
+fn activity_kind(kind: StreamUpdateKind, subagent_observed: bool) -> Option<ActivityKind> {
+    if subagent_observed {
+        return Some(ActivityKind::SubagentObserved);
+    }
+    match kind {
+        StreamUpdateKind::AgentMessageChunk => Some(ActivityKind::Message),
+        StreamUpdateKind::AgentThoughtChunk => Some(ActivityKind::Thought),
+        StreamUpdateKind::ToolCall => Some(ActivityKind::ToolCall),
+        StreamUpdateKind::ToolCallUpdate => Some(ActivityKind::ToolCallUpdate),
+        StreamUpdateKind::SessionInfoUpdate => Some(ActivityKind::SessionInfo),
+        StreamUpdateKind::AvailableCommandsUpdate => Some(ActivityKind::AvailableCommands),
+        StreamUpdateKind::Plan => Some(ActivityKind::Plan),
+        StreamUpdateKind::PermissionDenied => Some(ActivityKind::PermissionDenied),
+        StreamUpdateKind::Other => Some(ActivityKind::Other),
+        StreamUpdateKind::UsageUpdate => None,
+    }
 }
 
 fn derive_changed_files(updates: &[StreamUpdate], final_text: &str, cwd: &Path) -> Vec<PathBuf> {
@@ -611,13 +943,15 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, DelegationE
 
 fn append_event(
     path: &Path,
-    kind: &str,
-    update: Option<StreamUpdate>,
+    handle: &TaskHandle,
+    attempt: u32,
+    kind: TaskEventKind,
 ) -> Result<(), DelegationError> {
     let event = TaskEvent {
         timestamp_unix_ms: now_ms(),
-        kind: kind.to_owned(),
-        update,
+        task_id: handle.id.clone(),
+        attempt,
+        kind,
     };
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     serde_json::to_writer(&mut file, &event)?;
@@ -626,7 +960,113 @@ fn append_event(
     Ok(())
 }
 
+fn read_events(path: &Path) -> Result<Vec<TaskEvent>, DelegationError> {
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let text = fs::read_to_string(path)?;
+    let complete = text.ends_with('\n');
+    let mut events = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str(line) {
+            Ok(event) => events.push(event),
+            Err(_) if !complete && index + 1 == text.lines().count() => break,
+            Err(error) => return Err(DelegationError::Json(error)),
+        }
+    }
+    Ok(events)
+}
+
+fn read_attempts(
+    state_dir: &Path,
+    handle: &TaskHandle,
+) -> Result<(Vec<AttemptObservation>, Vec<TaskEvent>, UsageTotals), DelegationError> {
+    let root = state_dir.join("tasks").join(&handle.id).join("attempts");
+    let mut numbers = fs::read_dir(&root)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+        .collect::<Vec<_>>();
+    numbers.sort_unstable();
+    let mut attempts = Vec::new();
+    let mut events = Vec::new();
+    let mut usage = UsageTotals::default();
+    for number in numbers {
+        let paths = TaskPaths::for_attempt(state_dir, handle, number);
+        if !paths.state.is_file() {
+            continue;
+        }
+        let attempt: ExecutionAttempt = read_json(&paths.state)?;
+        add_usage(&mut usage, &attempt.usage);
+        attempts.push(AttemptObservation {
+            number: attempt.number,
+            status: attempt.status,
+            harness_session_id: attempt.harness_session_id,
+            usage: attempt.usage,
+        });
+        events.extend(read_events(&paths.events)?);
+    }
+    Ok((attempts, events, usage))
+}
+
+fn read_task_usage(task_root: &Path) -> Result<UsageTotals, DelegationError> {
+    let handle = TaskHandle {
+        id: task_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                DelegationError::InvalidParams("task directory has no handle".to_owned())
+            })?
+            .to_owned(),
+    };
+    let state_dir = task_root.parent().and_then(Path::parent).ok_or_else(|| {
+        DelegationError::InvalidParams("task directory has no state root".to_owned())
+    })?;
+    read_attempts(state_dir, &handle).map(|(_, _, usage)| usage)
+}
+
+fn add_usage(total: &mut UsageTotals, attempt: &UsageTotals) {
+    if let Some(cost) = &attempt.cost {
+        match &mut total.cost {
+            Some(accumulated) if accumulated.currency == cost.currency => {
+                accumulated.amount += cost.amount;
+            }
+            None => total.cost = Some(cost.clone()),
+            Some(_) => {}
+        }
+    }
+    if let Some(tokens) = &attempt.tokens {
+        match &mut total.tokens {
+            Some(accumulated) => {
+                accumulated.total_tokens += tokens.total_tokens;
+                accumulated.input_tokens += tokens.input_tokens;
+                accumulated.output_tokens += tokens.output_tokens;
+                add_optional(&mut accumulated.thought_tokens, tokens.thought_tokens);
+                add_optional(
+                    &mut accumulated.cached_read_tokens,
+                    tokens.cached_read_tokens,
+                );
+                add_optional(
+                    &mut accumulated.cached_write_tokens,
+                    tokens.cached_write_tokens,
+                );
+            }
+            None => total.tokens = Some(tokens.clone()),
+        }
+    }
+}
+
+fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *total = Some(total.unwrap_or(0) + value);
+    }
+}
+
 struct TaskPaths {
+    task_root: PathBuf,
     attempt: PathBuf,
     task: PathBuf,
     request: PathBuf,
@@ -638,9 +1078,14 @@ struct TaskPaths {
 
 impl TaskPaths {
     fn new(state_dir: &Path, handle: &TaskHandle) -> Self {
+        Self::for_attempt(state_dir, handle, 1)
+    }
+
+    fn for_attempt(state_dir: &Path, handle: &TaskHandle, number: u32) -> Self {
         let task = state_dir.join("tasks").join(&handle.id);
-        let attempt = task.join("attempts/1");
+        let attempt = task.join("attempts").join(number.to_string());
         Self {
+            task_root: task.clone(),
             task: task.join("task.json"),
             request: attempt.join("request.json"),
             state: attempt.join("state.json"),
@@ -736,6 +1181,7 @@ mod tests {
                 status: TaskStatus::Succeeded,
                 supervisor_pid: None,
                 harness_session_id: Some("session".to_owned()),
+                usage: UsageTotals::default(),
             },
         )
         .unwrap_or_else(|error| panic!("state: {error}"));
@@ -777,6 +1223,7 @@ mod tests {
                 status: TaskStatus::Running,
                 supervisor_pid: None,
                 harness_session_id: None,
+                usage: UsageTotals::default(),
             },
         )
         .unwrap_or_else(|error| panic!("state: {error}"));
@@ -844,6 +1291,275 @@ mod tests {
             fs::read_to_string(paths.events)
                 .unwrap_or_else(|error| panic!("events: {error}"))
                 .contains("attempt_finished")
+        );
+    }
+
+    #[tokio::test]
+    async fn observe_reports_normalized_events_and_accumulated_usage() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_666666666666666666666666".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-codex");
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params.clone(),
+                attempt: ExecutionAttempt {
+                    number: 1,
+                    status: TaskStatus::Queued,
+                    supervisor_pid: None,
+                    harness_session_id: None,
+                    usage: UsageTotals::default(),
+                },
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+
+        run_supervisor(root.path(), &handle)
+            .await
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+        let delegator = Delegator::new(root.path(), "/does/not/run");
+        let observed = delegator
+            .inspect(&handle)
+            .unwrap_or_else(|error| panic!("inspect: {error}"));
+
+        assert_eq!(observed.task.handle, handle);
+        assert_eq!(observed.task.usage_support, UsageSupport::codex());
+        assert_eq!(
+            observed
+                .task
+                .usage
+                .tokens
+                .as_ref()
+                .map(|usage| usage.total_tokens),
+            Some(16_749)
+        );
+        assert!(observed.task.usage.cost.is_none());
+        assert!(
+            observed
+                .events
+                .iter()
+                .any(|event| matches!(event.kind, TaskEventKind::UsageAccumulated { .. }))
+        );
+        let events_json = serde_json::to_string(&observed.events)
+            .unwrap_or_else(|error| panic!("events json: {error}"));
+        assert!(
+            !events_json.contains("Hello"),
+            "events must not copy transcript text"
+        );
+
+        let listed = delegator
+            .list()
+            .unwrap_or_else(|error| panic!("list: {error}"));
+        assert_eq!(listed.tasks.len(), 1);
+        assert_eq!(listed.tasks[0], observed.task);
+    }
+
+    #[tokio::test]
+    async fn observe_keeps_unreported_usage_absent() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_777777777777777777777777".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-minimal");
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params.clone(),
+                attempt: ExecutionAttempt {
+                    number: 1,
+                    status: TaskStatus::Queued,
+                    supervisor_pid: None,
+                    harness_session_id: None,
+                    usage: UsageTotals::default(),
+                },
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+        run_supervisor(root.path(), &handle)
+            .await
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+
+        let observed = Delegator::new(root.path(), "/does/not/run")
+            .inspect(&handle)
+            .unwrap_or_else(|error| panic!("inspect: {error}"));
+        assert!(observed.task.usage.tokens.is_none());
+        assert!(observed.task.usage.cost.is_none());
+    }
+
+    #[tokio::test]
+    async fn observe_accumulates_streamed_cost_and_terminal_tokens() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_888888888888888888888888".to_owned(),
+        };
+        let mut request = fake_request(root.path(), "replay-usage");
+        request.params.harness = Harness::Claude;
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params.clone(),
+                attempt: ExecutionAttempt {
+                    number: 1,
+                    status: TaskStatus::Queued,
+                    supervisor_pid: None,
+                    harness_session_id: None,
+                    usage: UsageTotals::default(),
+                },
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+        run_supervisor(root.path(), &handle)
+            .await
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+
+        let observed = Delegator::new(root.path(), "/does/not/run")
+            .inspect(&handle)
+            .unwrap_or_else(|error| panic!("inspect: {error}"));
+        assert_eq!(observed.task.usage_support, UsageSupport::claude());
+        assert_eq!(
+            observed.task.usage.cost,
+            Some(UsageCost {
+                amount: 0.25,
+                currency: "USD".to_owned(),
+            })
+        );
+        assert_eq!(
+            observed.task.usage.tokens.map(|usage| usage.total_tokens),
+            Some(120)
+        );
+        assert_eq!(
+            observed
+                .events
+                .iter()
+                .filter(|event| matches!(event.kind, TaskEventKind::UsageAccumulated { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn observe_reads_live_state_without_the_supervisor() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_999999999999999999999999".to_owned(),
+        };
+        let mut request = fake_request(root.path(), "replay-usage");
+        request.params.harness = Harness::Claude;
+        let paths = prepare_supervisor(root.path(), &handle, &request);
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params.clone(),
+                attempt: ExecutionAttempt {
+                    number: 1,
+                    status: TaskStatus::Queued,
+                    supervisor_pid: None,
+                    harness_session_id: None,
+                    usage: UsageTotals::default(),
+                },
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+        let state_dir = root.path().to_path_buf();
+        let supervisor_handle = handle.clone();
+        let supervisor =
+            tokio::spawn(async move { run_supervisor(&state_dir, &supervisor_handle).await });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let live = Delegator::new(root.path(), "/does/not/run")
+            .inspect(&handle)
+            .unwrap_or_else(|error| panic!("live inspect: {error}"));
+        assert_eq!(live.task.status, TaskStatus::Running);
+        assert!(
+            live.events
+                .iter()
+                .any(|event| matches!(event.kind, TaskEventKind::AttemptStarted))
+        );
+
+        supervisor
+            .await
+            .unwrap_or_else(|error| panic!("join: {error}"))
+            .unwrap_or_else(|error| panic!("supervisor: {error}"));
+        let complete = Delegator::new(root.path(), "/does/not/run")
+            .inspect(&handle)
+            .unwrap_or_else(|error| panic!("complete inspect: {error}"));
+        assert_eq!(complete.task.status, TaskStatus::Succeeded);
+        assert!(complete.task.usage.cost.is_some());
+        assert!(complete.task.usage.tokens.is_some());
+    }
+
+    #[test]
+    fn observe_accumulates_usage_across_attempts() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let handle = TaskHandle {
+            id: "tsk_aaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+        };
+        let request = fake_request(root.path(), "replay-minimal");
+        for (number, amount, tokens) in [(1, 0.25, 100), (2, 0.50, 200)] {
+            let paths = TaskPaths::for_attempt(root.path(), &handle, number);
+            fs::create_dir_all(&paths.attempt).unwrap_or_else(|error| panic!("mkdir: {error}"));
+            write_json(
+                &paths.state,
+                &ExecutionAttempt {
+                    number,
+                    status: TaskStatus::Succeeded,
+                    supervisor_pid: None,
+                    harness_session_id: Some(format!("session-{number}")),
+                    usage: UsageTotals {
+                        cost: Some(UsageCost {
+                            amount,
+                            currency: "USD".to_owned(),
+                        }),
+                        tokens: Some(TurnUsage {
+                            total_tokens: tokens,
+                            input_tokens: tokens - 10,
+                            output_tokens: 10,
+                            thought_tokens: None,
+                            cached_read_tokens: None,
+                            cached_write_tokens: None,
+                        }),
+                    },
+                },
+            )
+            .unwrap_or_else(|error| panic!("state: {error}"));
+        }
+        let paths = TaskPaths::new(root.path(), &handle);
+        write_json(
+            &paths.task,
+            &DelegatedTask {
+                handle: handle.clone(),
+                params: request.params,
+                attempt: ExecutionAttempt {
+                    number: 1,
+                    status: TaskStatus::Succeeded,
+                    supervisor_pid: None,
+                    harness_session_id: Some("session-1".to_owned()),
+                    usage: UsageTotals::default(),
+                },
+            },
+        )
+        .unwrap_or_else(|error| panic!("task: {error}"));
+
+        let observed = Delegator::new(root.path(), "/does/not/run")
+            .inspect(&handle)
+            .unwrap_or_else(|error| panic!("inspect: {error}"));
+        assert_eq!(observed.attempts.len(), 2);
+        assert_eq!(
+            observed.task.usage.cost.as_ref().map(|cost| cost.amount),
+            Some(0.75)
+        );
+        assert_eq!(
+            observed.task.usage.tokens.map(|usage| usage.total_tokens),
+            Some(300)
         );
     }
 
@@ -980,13 +1696,50 @@ mod tests {
             kind: crate::acp::StreamUpdateKind::ToolCall,
             text: Some("spawn_agent".to_owned()),
             changed_files: Vec::new(),
+            cost: None,
         };
         assert!(looks_like_subagent(&update));
         let ordinary = StreamUpdate {
             kind: crate::acp::StreamUpdateKind::AgentMessageChunk,
             text: Some("subagent".to_owned()),
             changed_files: Vec::new(),
+            cost: None,
         };
         assert!(!looks_like_subagent(&ordinary));
+    }
+
+    #[test]
+    fn activity_mapping_covers_the_normalized_vocabulary() {
+        let cases = [
+            (StreamUpdateKind::AgentMessageChunk, ActivityKind::Message),
+            (StreamUpdateKind::AgentThoughtChunk, ActivityKind::Thought),
+            (StreamUpdateKind::ToolCall, ActivityKind::ToolCall),
+            (
+                StreamUpdateKind::ToolCallUpdate,
+                ActivityKind::ToolCallUpdate,
+            ),
+            (
+                StreamUpdateKind::SessionInfoUpdate,
+                ActivityKind::SessionInfo,
+            ),
+            (
+                StreamUpdateKind::AvailableCommandsUpdate,
+                ActivityKind::AvailableCommands,
+            ),
+            (StreamUpdateKind::Plan, ActivityKind::Plan),
+            (
+                StreamUpdateKind::PermissionDenied,
+                ActivityKind::PermissionDenied,
+            ),
+            (StreamUpdateKind::Other, ActivityKind::Other),
+        ];
+        for (update, expected) in cases {
+            assert_eq!(activity_kind(update, false), Some(expected));
+        }
+        assert_eq!(activity_kind(StreamUpdateKind::UsageUpdate, false), None);
+        assert_eq!(
+            activity_kind(StreamUpdateKind::ToolCall, true),
+            Some(ActivityKind::SubagentObserved)
+        );
     }
 }

@@ -2,13 +2,13 @@
 
 Give the coding agent you already use subagents from any supported coding harness, with one durable place to observe the delegated work and retrieve its result.
 
-`sub` is in pre-beta. Claude Code and Codex can install their pinned ACP bridges, launch one bounded child task under an independent supervisor, and wait on the returned durable handle through CLI or MCP.
+`sub` is in pre-beta. Claude Code and Codex can install their pinned ACP bridges, launch one bounded child task under an independent supervisor, wait on the returned durable handle, and independently observe task status, normalized events, reported cost, and reported tokens through CLI or MCP.
 
 ## Status
 
-Current proof: Delegate passes from a real Claude Code manager to a real Codex child. Observe, Recover, and Control remain later proofs. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md) and [`CHANGELOG.md`](CHANGELOG.md).
+Current proofs: Delegate passes from a real Claude Code manager to a real Codex child, and Observe passes live and after completion on real Claude Code and Codex tasks through independent CLI and MCP processes. Recover and Control remain later proofs. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), and [`CHANGELOG.md`](CHANGELOG.md).
 
-## Try launch and wait
+## Try launch, wait, and Observe
 
 Install each exact pinned bridge once. `npm` is required only for these explicit install commands.
 
@@ -25,7 +25,16 @@ target/debug/sub launch --harness codex --cwd "$PWD" --prompt "Review the curren
 target/debug/sub wait tsk_REPLACE_WITH_HANDLE --timeout-seconds 30
 ```
 
-If wait returns `{"state":"running",...}`, call it again with the same handle. The MCP server binary is `target/debug/sub-mcp`; it exposes `sub_bridge_install`, `sub_launch`, and `sub_wait` with the same fields.
+If wait returns `{"state":"running",...}`, call it again with the same handle. The MCP server binary is `target/debug/sub-mcp`; its `sub_bridge_install`, `sub_launch`, and `sub_wait` tools expose the same controls.
+
+Observe from any process that can read the same state directory:
+
+```sh
+target/debug/sub list
+target/debug/sub inspect tsk_REPLACE_WITH_HANDLE
+```
+
+The MCP server also exposes `sub_list` and `sub_inspect`. Both surfaces serialize the same SDK shapes. Unsupported usage is null beside `usage_support: false`; it is never reported as zero or estimated.
 
 ## Build
 

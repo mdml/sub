@@ -219,7 +219,20 @@ impl SharedState {
             }
         }
 
-        responder.respond(PromptResponse::new(self.stop_reason()))
+        let mut response = PromptResponse::new(self.stop_reason());
+        if let Some(usage) = &self.fixture.manifest.prompt.usage {
+            response = response.usage(
+                agent_client_protocol::schema::v1::Usage::new(
+                    usage.total_tokens,
+                    usage.input_tokens,
+                    usage.output_tokens,
+                )
+                .thought_tokens(usage.thought_tokens)
+                .cached_read_tokens(usage.cached_read_tokens)
+                .cached_write_tokens(usage.cached_write_tokens),
+            );
+        }
+        responder.respond(response)
     }
 
     fn stop_reason(&self) -> StopReason {
