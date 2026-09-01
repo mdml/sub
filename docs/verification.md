@@ -6,6 +6,7 @@ One entry point, `scripts/verify.sh`, is run by `claude`, `codex`, `cursor-agent
 
 - Rust toolchain: `rustup` reads `rust-toolchain.toml` (1.97.1 with `rustfmt`, `clippy`, `llvm-tools`).
 - Tools: `mise install` provisions `just`, `cargo-llvm-cov`, and `cargo-deny` at the versions in `mise.toml`. Without `mise`, install the same versions with `cargo install`.
+- Full gate only: `scripts/codescene.sh` additionally needs `python3` and, when the CodeScene CLI is not on `PATH`, `curl`.
 
 ## The per-commit gate: `scripts/verify.sh`
 
@@ -17,7 +18,7 @@ Runs on every push to a pull-request branch and on pull requests into `staging`.
 | Lint | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | Any warning. Lint levels are set in the root `Cargo.toml` (`clippy::all`, `clippy::pedantic`, `unwrap_used`, `expect_used`; `unsafe_code` forbidden; `missing_docs` warned). |
 | Typecheck and build | `cargo build --workspace --all-targets --all-features --locked` | Compile error, or `Cargo.lock` out of date. |
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked` | Broken intra-doc link or rustdoc warning. |
-| Tests and coverage | `cargo llvm-cov --workspace --all-features --locked --fail-under-lines 90 --summary-only` | Any test fails, or line coverage over the workspace is 90 % or below. |
+| Tests and coverage | `cargo llvm-cov --workspace --all-features --locked --fail-under-lines 90 --summary-only` | Any test fails, or line coverage over the workspace is below 90 %. |
 
 The per-commit gate includes the behavioral contract suite (`crates/sub-sdk/tests/behavioral_contract.rs`) against the `sub-harness-fake` binary, plus kernel and surface tests for durable launch/wait and bridge integrity. Opt-in real-harness runs use `SUB_CONTRACT_REAL_HARNESS` and the bridge path printed by `sub bridge install`; see [`nightlies/harness-compatibility.md`](nightlies/harness-compatibility.md).
 
