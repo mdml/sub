@@ -9,7 +9,17 @@ use std::time::Duration;
 use sub_sdk::config::SubConfig;
 use sub_sdk::delegation::{AdapterLaunch, Delegator, Harness, LaunchParams, TaskHandle};
 
-fn flag(args: &[String], name: &str) -> Result<String, String> {
+struct Arguments(Vec<String>);
+
+impl std::ops::Deref for Arguments {
+    type Target = [String];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn flag(args: &Arguments, name: &str) -> Result<String, String> {
     let index = args
         .iter()
         .position(|arg| arg == name)
@@ -19,14 +29,14 @@ fn flag(args: &[String], name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{name} requires a value"))
 }
 
-fn optional_flag(args: &[String], name: &str) -> Option<String> {
+fn optional_flag(args: &Arguments, name: &str) -> Option<String> {
     args.iter()
         .position(|arg| arg == name)
         .and_then(|index| args.get(index + 1))
         .cloned()
 }
 
-fn state_dir(args: &[String], config: &SubConfig) -> Result<PathBuf, String> {
+fn state_dir(args: &Arguments, config: &SubConfig) -> Result<PathBuf, String> {
     if let Some(value) = optional_flag(args, "--state-dir") {
         return Ok(PathBuf::from(value));
     }
@@ -83,7 +93,7 @@ fn config() -> Result<sub_sdk::config::LoadedConfig, String> {
     }
 }
 
-fn launch_params(args: &[String], config: &SubConfig) -> Result<LaunchParams, String> {
+fn launch_params(args: &Arguments, config: &SubConfig) -> Result<LaunchParams, String> {
     let harness = parse_harness(&flag(args, "--harness")?)?;
     let defaults = config.harness(harness);
     let harness_binary = optional_flag(args, "--binary")
@@ -122,7 +132,7 @@ const fn harness_name(harness: Harness) -> &'static str {
     }
 }
 
-fn onboarding_harnesses(args: &[String]) -> Result<Vec<Harness>, String> {
+fn onboarding_harnesses(args: &Arguments) -> Result<Vec<Harness>, String> {
     let mut harnesses = Vec::new();
     for value in args.iter().skip(1).take_while(|arg| !arg.starts_with("--")) {
         let harness = parse_harness(value)?;
@@ -145,7 +155,7 @@ fn mcp_binary() -> Result<PathBuf, String> {
         .with_file_name("sub-mcp"))
 }
 
-fn onboard_command(args: &[String]) -> Result<(), String> {
+fn onboard_command(args: &Arguments) -> Result<(), String> {
     let loaded = sub_sdk::config::load().map_err(|error| error.to_string())?;
     if !loaded.exists {
         return Err(format!("sub.toml not found at {}", loaded.path.display()));
@@ -154,10 +164,12 @@ fn onboard_command(args: &[String]) -> Result<(), String> {
     let root = state_dir(args, &loaded.config)?;
     let reports = onboarding::onboard(
         &harnesses,
-        &loaded.config,
-        &root,
-        &mcp_binary()?,
-        &onboarding::Locations::from_environment()?,
+        onboarding::OnboardContext {
+            config: &loaded.config,
+            state_dir: &root,
+            mcp_binary: &mcp_binary()?,
+            locations: &onboarding::Locations::from_environment()?,
+        },
     )?;
     println!(
         "{}",
@@ -166,15 +178,29 @@ fn onboard_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn recover(args: &[String]) -> Result<(), String> {
+fn recover(args: &Arguments) -> Result<(), String> {
+    run_control(args, "recover", |delegator, handle| {
+        delegator.recover(handle)
+    })
+}
+
+fn cancel(args: &Arguments) -> Result<(), String> {
+    run_control(args, "cancel", Delegator::cancel)
+}
+
+fn run_control<T: serde::Serialize>(
+    args: &Arguments,
+    command: &str,
+    control: impl FnOnce(&Delegator, &TaskHandle) -> Result<T, sub_sdk::delegation::DelegationError>,
+) -> Result<(), String> {
     let id = args
         .get(1)
-        .ok_or_else(|| "usage: sub recover HANDLE [--state-dir PATH]".to_owned())?;
+        .ok_or_else(|| format!("usage: sub {command} HANDLE [--state-dir PATH]"))?;
     let executable = env::current_exe().map_err(|error| error.to_string())?;
     let loaded = config()?;
-    let outcome = Delegator::new(state_dir(args, &loaded.config)?, executable)
-        .recover(&TaskHandle { id: id.clone() })
-        .map_err(|error| error.to_string())?;
+    let delegator = Delegator::new(state_dir(args, &loaded.config)?, executable);
+    let outcome =
+        control(&delegator, &TaskHandle { id: id.clone() }).map_err(|error| error.to_string())?;
     println!(
         "{}",
         serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
@@ -182,23 +208,7 @@ fn recover(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn cancel(args: &[String]) -> Result<(), String> {
-    let id = args
-        .get(1)
-        .ok_or_else(|| "usage: sub cancel HANDLE [--state-dir PATH]".to_owned())?;
-    let executable = env::current_exe().map_err(|error| error.to_string())?;
-    let loaded = config()?;
-    let outcome = Delegator::new(state_dir(args, &loaded.config)?, executable)
-        .cancel(&TaskHandle { id: id.clone() })
-        .map_err(|error| error.to_string())?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
-    );
-    Ok(())
-}
-
-async fn supervise(args: &[String]) -> Result<(), String> {
+async fn supervise(args: &Arguments) -> Result<(), String> {
     let id = args
         .get(1)
         .ok_or_else(|| "supervisor handle missing".to_owned())?;
@@ -238,76 +248,17 @@ fn bridge_install_output(harness: &str, root: &Path, config: &SubConfig) -> Resu
 }
 
 async fn run() -> Result<(), String> {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let args = Arguments(env::args().skip(1).collect());
     match args.first().map(String::as_str) {
         Some("bridge") if args.get(1).map(String::as_str) == Some("install") => {
-            let harness = args.get(2).ok_or_else(|| {
-                "usage: sub bridge install <claude|codex|cursor> [--state-dir PATH]".to_owned()
-            })?;
-            let loaded = config()?;
-            let root = state_dir(&args, &loaded.config)?;
-            println!("{}", bridge_install_output(harness, &root, &loaded.config)?);
+            bridge_install_command(&args)?;
         }
-        Some("launch") => {
-            let loaded = config()?;
-            let root = state_dir(&args, &loaded.config)?;
-            let params = launch_params(&args, &loaded.config)?;
-            let prepared = adapter(params.harness, &root, &params.harness_binary)?;
-            let executable = env::current_exe().map_err(|error| error.to_string())?;
-            let handle = Delegator::new(root, executable)
-                .launch(params, prepared)
-                .map_err(|error| error.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string(&handle).map_err(|error| error.to_string())?
-            );
-        }
-        Some("wait") => {
-            let id = args.get(1).ok_or_else(|| {
-                "usage: sub wait HANDLE [--timeout-seconds N] [--state-dir PATH]".to_owned()
-            })?;
-            let seconds = optional_flag(&args, "--timeout-seconds")
-                .unwrap_or_else(|| "30".to_owned())
-                .parse::<u64>()
-                .map_err(|error| format!("invalid timeout: {error}"))?;
-            let executable = env::current_exe().map_err(|error| error.to_string())?;
-            let loaded = config()?;
-            let outcome = Delegator::new(state_dir(&args, &loaded.config)?, executable)
-                .wait(&TaskHandle { id: id.clone() }, Duration::from_secs(seconds))
-                .await
-                .map_err(|error| error.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
-            );
-        }
+        Some("launch") => launch_command(&args)?,
+        Some("wait") => wait_command(&args).await?,
         Some("recover") => recover(&args)?,
         Some("cancel") => cancel(&args)?,
-        Some("list") => {
-            let executable = env::current_exe().map_err(|error| error.to_string())?;
-            let loaded = config()?;
-            let tasks = Delegator::new(state_dir(&args, &loaded.config)?, executable)
-                .list()
-                .map_err(|error| error.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&tasks).map_err(|error| error.to_string())?
-            );
-        }
-        Some("inspect") => {
-            let id = args
-                .get(1)
-                .ok_or_else(|| "usage: sub inspect HANDLE [--state-dir PATH]".to_owned())?;
-            let executable = env::current_exe().map_err(|error| error.to_string())?;
-            let loaded = config()?;
-            let task = Delegator::new(state_dir(&args, &loaded.config)?, executable)
-                .inspect(&TaskHandle { id: id.clone() })
-                .map_err(|error| error.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&task).map_err(|error| error.to_string())?
-            );
-        }
+        Some("list") => list_command(&args)?,
+        Some("inspect") => inspect_command(&args)?,
         Some("onboard") => onboard_command(&args)?,
         Some("__supervise") => supervise(&args).await?,
         Some("--version" | "-V") | None => println!("sub {}", sub_sdk::version()),
@@ -318,6 +269,82 @@ async fn run() -> Result<(), String> {
             );
         }
     }
+    Ok(())
+}
+
+fn bridge_install_command(args: &Arguments) -> Result<(), String> {
+    let harness = args.get(2).ok_or_else(|| {
+        "usage: sub bridge install <claude|codex|cursor> [--state-dir PATH]".to_owned()
+    })?;
+    let loaded = config()?;
+    let root = state_dir(args, &loaded.config)?;
+    println!("{}", bridge_install_output(harness, &root, &loaded.config)?);
+    Ok(())
+}
+
+fn launch_command(args: &Arguments) -> Result<(), String> {
+    let loaded = config()?;
+    let root = state_dir(args, &loaded.config)?;
+    let params = launch_params(args, &loaded.config)?;
+    let prepared = adapter(params.harness, &root, &params.harness_binary)?;
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let handle = Delegator::new(root, executable)
+        .launch(params, prepared)
+        .map_err(|error| error.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string(&handle).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+async fn wait_command(args: &Arguments) -> Result<(), String> {
+    let id = args.get(1).ok_or_else(|| {
+        "usage: sub wait HANDLE [--timeout-seconds N] [--state-dir PATH]".to_owned()
+    })?;
+    let seconds = optional_flag(args, "--timeout-seconds")
+        .unwrap_or_else(|| "30".to_owned())
+        .parse::<u64>()
+        .map_err(|error| format!("invalid timeout: {error}"))?;
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let loaded = config()?;
+    let outcome = Delegator::new(state_dir(args, &loaded.config)?, executable)
+        .wait(&TaskHandle { id: id.clone() }, Duration::from_secs(seconds))
+        .await
+        .map_err(|error| error.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&outcome).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+fn list_command(args: &Arguments) -> Result<(), String> {
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let loaded = config()?;
+    let tasks = Delegator::new(state_dir(args, &loaded.config)?, executable)
+        .list()
+        .map_err(|error| error.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&tasks).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+fn inspect_command(args: &Arguments) -> Result<(), String> {
+    let id = args
+        .get(1)
+        .ok_or_else(|| "usage: sub inspect HANDLE [--state-dir PATH]".to_owned())?;
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let loaded = config()?;
+    let task = Delegator::new(state_dir(args, &loaded.config)?, executable)
+        .inspect(&TaskHandle { id: id.clone() })
+        .map_err(|error| error.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&task).map_err(|error| error.to_string())?
+    );
     Ok(())
 }
 
@@ -334,7 +361,7 @@ mod tests {
     use super::*;
     #[test]
     fn explicit_state_dir_wins() {
-        let args = vec!["--state-dir".to_owned(), "/tmp/sub-state".to_owned()];
+        let args = Arguments(vec!["--state-dir".to_owned(), "/tmp/sub-state".to_owned()]);
         let config = SubConfig {
             state_dir: Some(PathBuf::from("/tmp/config-state")),
             ..SubConfig::default()
@@ -344,7 +371,7 @@ mod tests {
             Ok(PathBuf::from("/tmp/sub-state"))
         );
         assert_eq!(
-            state_dir(&[], &config),
+            state_dir(&Arguments(Vec::new()), &config),
             Ok(PathBuf::from("/tmp/config-state"))
         );
     }
@@ -381,24 +408,28 @@ mod tests {
             "[harnesses.codex]\nbinary = '/configured/codex'\nmodel = 'configured'\npermission_mode = 'agent'\n",
         )
         .unwrap_or_else(|error| panic!("config: {error}"));
-        let base = [
-            "launch",
-            "--harness",
-            "codex",
-            "--prompt",
-            "probe",
-            "--cwd",
-            "/tmp",
-        ]
-        .map(str::to_owned);
+        let base = Arguments(
+            vec![
+                "launch",
+                "--harness",
+                "codex",
+                "--prompt",
+                "probe",
+                "--cwd",
+                "/tmp",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        );
         let resolved = launch_params(&base, &config)
             .unwrap_or_else(|error| panic!("configured params: {error}"));
         assert_eq!(resolved.harness_binary, PathBuf::from("/configured/codex"));
         assert_eq!(resolved.model.as_deref(), Some("configured"));
         assert_eq!(resolved.permission_mode, "agent");
 
-        let mut explicit = base.to_vec();
-        explicit.extend(
+        let mut explicit = Arguments(base.to_vec());
+        explicit.0.extend(
             [
                 "--binary",
                 "/explicit/codex",
@@ -440,19 +471,23 @@ mod tests {
 
     #[test]
     fn onboarding_names_are_deduplicated_and_required() {
-        let args = [
-            "onboard",
-            "claude",
-            "claude",
-            "codex",
-            "--state-dir",
-            "/tmp",
-        ]
-        .map(str::to_owned);
+        let args = Arguments(
+            vec![
+                "onboard",
+                "claude",
+                "claude",
+                "codex",
+                "--state-dir",
+                "/tmp",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        );
         assert_eq!(
             onboarding_harnesses(&args),
             Ok(vec![Harness::Claude, Harness::Codex])
         );
-        assert!(onboarding_harnesses(&["onboard".to_owned()]).is_err());
+        assert!(onboarding_harnesses(&Arguments(vec!["onboard".to_owned()])).is_err());
     }
 }

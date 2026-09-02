@@ -124,15 +124,7 @@ impl StreamUpdate {
             SessionUpdate::ToolCallUpdate(tool) => Self {
                 kind: StreamUpdateKind::ToolCallUpdate,
                 text: tool.fields.title.clone(),
-                changed_files: tool
-                    .fields
-                    .locations
-                    .as_ref()
-                    .map_or_else(Vec::new, |locations| {
-                        tool.fields
-                            .kind
-                            .map_or_else(Vec::new, |kind| changed_locations(kind, locations))
-                    }),
+                changed_files: changed_tool_update_locations(tool),
                 cost: None,
             },
             SessionUpdate::UsageUpdate(usage) => Self {
@@ -170,6 +162,17 @@ impl StreamUpdate {
             },
         }
     }
+}
+
+fn changed_tool_update_locations(
+    tool: &agent_client_protocol::schema::v1::ToolCallUpdate,
+) -> Vec<PathBuf> {
+    let Some(locations) = &tool.fields.locations else {
+        return Vec::new();
+    };
+    tool.fields
+        .kind
+        .map_or_else(Vec::new, |kind| changed_locations(kind, locations))
 }
 
 fn changed_locations(
