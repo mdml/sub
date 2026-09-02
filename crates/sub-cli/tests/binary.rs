@@ -2,6 +2,10 @@
 
 use std::process::Command;
 
+fn existing_binary() -> std::path::PathBuf {
+    std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"))
+}
+
 #[cfg(unix)]
 fn fake_npm(root: &std::path::Path) -> String {
     use std::fs;
@@ -78,5 +82,7 @@ mod install_launch_and_wait_use_one_durable_shape;
 mod onboarding_is_scoped_and_idempotent_in_throwaway_roots;
 #[path = "binary/prints_version.rs"]
 mod prints_version;
+#[path = "binary/report_drafts_scrubbed_issue_without_submission.rs"]
+mod report_drafts_scrubbed_issue_without_submission;
 #[path = "binary/wait_reports_orphaned_and_recover_starts_the_next_attempt.rs"]
 mod wait_reports_orphaned_and_recover_starts_the_next_attempt;

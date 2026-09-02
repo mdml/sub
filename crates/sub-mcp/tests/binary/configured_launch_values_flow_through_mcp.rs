@@ -9,11 +9,13 @@ fn configured_launch_values_flow_through_mcp() {
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let state = root.path().join("state");
     let config = root.path().join("sub.toml");
+    let harness_binary = existing_binary().to_string_lossy().into_owned();
     fs::write(
         &config,
         format!(
-            "state_dir = '{}'\n[harnesses.codex]\nbinary = '/bin/true'\nmodel = 'mcp-config-model'\npermission_mode = 'agent'\n",
-            state.display()
+            "state_dir = '{}'\n[harnesses.codex]\nbinary = '{}'\nmodel = 'mcp-config-model'\npermission_mode = 'agent'\n",
+            state.display(),
+            harness_binary
         ),
     )
     .unwrap_or_else(|error| panic!("config: {error}"));
@@ -60,7 +62,7 @@ fn configured_launch_values_flow_through_mcp() {
             .unwrap_or_else(|error| panic!("task: {error}")),
     )
     .unwrap_or_else(|error| panic!("task json: {error}"));
-    assert_eq!(persisted["params"]["harness_binary"], "/bin/true");
+    assert_eq!(persisted["params"]["harness_binary"], harness_binary);
     assert_eq!(persisted["params"]["model"], "mcp-config-model");
     assert_eq!(persisted["params"]["permission_mode"], "agent");
     assert!(

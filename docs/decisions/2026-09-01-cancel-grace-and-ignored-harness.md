@@ -1,6 +1,6 @@
 # Cancellation grace period and ignored harnesses
 
-Date: 2026-09-01. Status: adopted.
+Date: 2026-09-01. Status: superseded in part on 2026-09-02 by [Owned process-group termination after cancellation grace](2026-09-02-cancel-force-termination.md); the grace period and terminal result semantics remain adopted.
 
 ## Decision
 

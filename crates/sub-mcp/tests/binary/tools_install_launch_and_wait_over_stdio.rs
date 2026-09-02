@@ -8,7 +8,8 @@ fn tools_install_launch_and_wait_over_stdio() {
     let mut stdin = child.stdin.take().unwrap_or_else(|| panic!("stdin"));
     let mut stdout = BufReader::new(child.stdout.take().unwrap_or_else(|| panic!("stdout")));
     let state = root.path().to_string_lossy();
-    assert_task_controls(&mut stdin, &mut stdout, &state);
+    let harness_binary = existing_binary().to_string_lossy().into_owned();
+    assert_task_controls(&mut stdin, &mut stdout, &state, &harness_binary);
     drop(stdin);
     assert!(
         child
@@ -44,6 +45,7 @@ fn assert_task_controls(
     stdin: &mut std::process::ChildStdin,
     stdout: &mut BufReader<std::process::ChildStdout>,
     state: &str,
+    harness_binary: &str,
 ) {
     let installed = rpc_call(
         stdin,
@@ -60,7 +62,7 @@ fn assert_task_controls(
     let launch = rpc_call(
         stdin,
         stdout,
-        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sub_launch","arguments":{"harness":"codex","prompt":"probe","cwd":state,"binary":"/bin/true","permission_mode":"agent","model":"test","state_dir":state}}}),
+        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sub_launch","arguments":{"harness":"codex","prompt":"probe","cwd":state,"binary":harness_binary,"permission_mode":"agent","model":"test","state_dir":state}}}),
     );
     let handle = launch["result"]["structuredContent"]["id"]
         .as_str()
@@ -90,7 +92,7 @@ fn assert_task_controls(
     let claude_launch = rpc_call(
         stdin,
         stdout,
-        serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sub_launch","arguments":{"harness":"claude","prompt":"probe","cwd":state,"binary":"/bin/true","permission_mode":"default"}}}),
+        serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sub_launch","arguments":{"harness":"claude","prompt":"probe","cwd":state,"binary":harness_binary,"permission_mode":"default"}}}),
     );
     assert!(claude_launch.to_string().contains("tsk_"));
 }

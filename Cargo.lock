@@ -1271,7 +1271,10 @@ name = "sub-sdk"
 version = "0.0.0"
 dependencies = [
  "agent-client-protocol",
+ "async-process",
+ "futures",
  "hex",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

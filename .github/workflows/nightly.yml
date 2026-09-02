@@ -1,6 +1,5 @@
-# GitHub nightly: vulnerability and dependency-freshness checks.
-# The on-machine harness-compatibility nightly is documented under docs/nightlies/
-# and is not run here.
+# GitHub nightly: verify main, publish a prerelease when main moved, and report
+# dependency drift. On-machine harness compatibility remains under docs/nightlies/.
 name: nightly
 
 on:
@@ -8,30 +7,184 @@ on:
     - cron: "17 6 * * *" # 06:17 UTC daily
   workflow_dispatch:
 
-permissions:
-  contents: read
+concurrency:
+  group: nightly-release-main
+  cancel-in-progress: false
 
 jobs:
-  vulnerabilities:
+  prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      changed: ${{ steps.release.outputs.changed }}
+      sha: ${{ steps.release.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+      - id: release
+        name: Decide whether main moved
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          last_tag=$(git for-each-ref --sort=-creatordate --format='%(refname:short)' 'refs/tags/v*-nightly.*' | head -n 1)
+          if [[ -n "$last_tag" && "$(git rev-list -n 1 "$last_tag")" == "$sha" ]] && gh release view "$last_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Nightly release"
+              echo "Skipped: \`main\` is still at \`$sha\`, the commit tagged by \`$last_tag\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          tag="v${version}-nightly.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null && {
+            echo "nightly tag already exists: $tag" >&2
+            exit 1
+          }
+          {
+            echo "changed=true"
+            echo "sha=$sha"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Nightly release"
+            echo "Will verify and publish \`$tag\` from \`$sha\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.97.1
+          components: rustfmt, clippy, llvm-tools
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
-          tool: cargo-deny@0.20.2
-      - run: cargo deny --locked check advisories
+          tool: cargo-llvm-cov@0.8.7,cargo-deny@0.20.2
+      - run: scripts/verify.sh --full --all
 
-  freshness:
-    runs-on: ubuntu-latest
+  build:
+    needs: [prepare, verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.97.1
-      - name: Report dependencies with newer compatible versions (informational; does not modify Cargo.lock)
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build release binaries
+        run: cargo build --profile dist --locked --target "${{ matrix.target }}" -p sub-cli -p sub-mcp
+      - name: Package release binaries
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p package artifacts
+          cp "target/$TARGET/dist/sub" "target/$TARGET/dist/sub-mcp" package/
+          tar -C package -czf "artifacts/sub-${TAG#v}-$TARGET.tar.gz" sub sub-mcp
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: artifacts/*.tar.gz
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-${{ matrix.target }}
+          path: artifacts/*.tar.gz
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_SHA }}
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: nightly-*
+          path: artifacts
+          merge-multiple: true
+      - name: Tag the verified main tip
+        run: |
+          case "$(git remote get-url --push origin)" in
+            git@github.com:* | ssh://git@github.com/*) ;;
+            *) echo "release ref writes require the SSH deploy key" >&2; exit 1 ;;
+          esac
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "$RELEASE_TAG" "$RELEASE_SHA" -m "Nightly $RELEASE_TAG"
+          git push origin "refs/tags/$RELEASE_TAG"
+      - name: Publish GitHub prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          sha256sum ./*.tar.gz > SHA256SUMS
+          gh release create "$RELEASE_TAG" ./*.tar.gz SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease \
+            --verify-tag \
+            --target "$RELEASE_SHA" \
+            --title "Nightly $RELEASE_TAG" \
+            --notes "Automated nightly prerelease from main at $RELEASE_SHA. Homebrew is published from stable tags only."
+
+  dependency-drift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.97.1
+      - name: Report newer compatible dependencies
         run: cargo update --dry-run
       - name: Report pinned GitHub Actions
         run: grep -rn "uses:" .github/workflows | sort -u

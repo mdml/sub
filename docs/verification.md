@@ -36,17 +36,21 @@ The base ref defaults to `origin/staging`. Override it with `scripts/verify.sh -
 
 `scripts/codescene.sh` also retains whole-tree mode as `scripts/codescene.sh` or `scripts/codescene.sh --all`. CodeScene documents JSON `score: null` as “no scorable code”; those files are reported as ineligible rather than passed as score 10.
 
+`scripts/verify.sh --full --all` selects that whole-tree mode while retaining every other full-gate step. The nightly release and confirmed stable-promotion workflows use it as the standing backstop for score drift in files untouched by the current release.
+
 ## CI
 
 | Workflow and required context | Trigger | Gate |
 |:--|:--|:--|
 | `per-commit.yml` / `verify` | Push to any branch except `main` and `staging` | Fast gate against the pushed commit. |
 | `per-commit.yml` / `verify` | Pull request into `staging` | Full gate relative to `staging`. |
+| `per-commit.yml` / `macOS test suite (fake harness)` | Push to any branch except `main` and `staging`; pull request into `staging` | Workspace test suite on `macos-latest`, including the fake-harness contract; no real harnesses or CodeScene. |
 | `full.yml` / `verify-full` | Pull request into `main` | Full gate relative to `main`. |
-| `nightly.yml` | Daily at 06:17 UTC; manual | Advisory check and dependency-freshness report. |
-| `release.yml` | Pull requests for release planning; cargo-dist semantic-version tag pushes for publishing | Generated release plan/build or publication; see [`release.md`](release.md). |
+| `nightly.yml` | Daily at 06:17 UTC; manual | Whole-tree full gate and GitHub prerelease when `main` moved; dependency-freshness report. |
+| `promote-stable.yml` | Manual preview and confirmed dispatch | Whole-tree full gate for the assembled stable pointer before any release ref is pushed. |
+| `release.yml` | Pull requests for release planning; explicit stable dispatch for publishing | Generated cargo-dist release plan/build or stable publication; see [`release.md`](release.md). |
 
-The `verify` and `verify-full` job names are the required-check contexts used by the protected-branch rulesets. Dependabot proposes Cargo and GitHub Actions updates weekly into `staging`. On-machine nightlies are documented under [`nightlies/`](nightlies/README.md).
+The `verify` and `verify-full` job names are the required-check contexts used by the protected-branch rulesets. `macOS test suite (fake harness)` is a required-check candidate for the `staging` ruleset. Dependabot proposes Cargo and GitHub Actions updates weekly into `staging`. On-machine nightlies are documented under [`nightlies/`](nightlies/README.md).
 
 ## Secrets
 

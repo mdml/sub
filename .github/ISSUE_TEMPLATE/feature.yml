@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a change to sub's delegated-work model or supported surfaces.
+title: "feat: "
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: User need
+      description: What delegated-work problem should sub solve?
+    validations:
+      required: true
+  - type: textarea
+    id: current_workflow
+    attributes:
+      label: Current workflow
+      description: Explain how the manager and child harnesses handle this today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the outcome without assuming a particular implementation.
+    validations:
+      required: true

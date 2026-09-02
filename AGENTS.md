@@ -31,9 +31,11 @@ Reload the relevant part of the mental model before reporting. Explain what chan
 
 ## Process
 
-- Work in your own git worktree. Open a PR into `staging`. `main` is promoted from `staging` by the owner, per proof.
-- `main` and `staging` are protected by GitHub rulesets: pull requests only, rebase-merge only, linear history, no force-push, no deletion, no bypass. A direct push to either branch is rejected.
-- Rebase-merge only; linear history. Conventional Commits.
+- Work in your own git worktree and open development PRs into `staging`. Rebase-merge those PRs to keep development history linear. Conventional Commits.
+- Promote `staging` into `main` with a reviewed, gated promotion PR merged by merge commit. Promotion is triggered per proof or milestone, not batched.
+- `main` is the nightly channel. Its ruleset admits promotion PR merge commits but rejects direct pushes, force-pushes, and deletion without bypass.
+- `stable` is assembled by the `promote to stable` workflow from a nightly-tagged `main` commit plus explicitly ordered cherry-picks. Its ruleset permits only holders of the release deploy key to create, update, or delete the branch; the private key lives only in this repository's Actions secrets and humans have no bypass.
+- Humans never create release tags. The nightly and stable promotion workflows create tags over SSH with the release deploy key, and the release-tag ruleset permits only holders of that key to write matching tags.
 - Documentation describes the current state of the repository on `staging` and `main`. Update it in the same PR as the code it describes.
 - Spikes land in `docs/spikes/<name>.md`, with captured evidence and any disposable prototype under `spikes/<name>/`. Run a spike only when the task names it. A resolved spike keeps its report and evidence; its prototype is deleted at resolution and stays recoverable from git history.
 - Resolved spikes: ACP boundary (`docs/spikes/acp-boundary.md`, 2026-08-27). Its recommendation is adopted in the mental model; read the mental model, not the report, for what was decided.

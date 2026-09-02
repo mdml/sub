@@ -25,6 +25,10 @@ Use `sub` when a bounded task benefits from parallel work, another harness, or i
 4. If inspection or wait reports `orphaned`, call `sub_recover` once, then wait on the same handle.
 
 Give each child one bounded task with an explicit expected result. Never ask a child to create subagents or delegate again.
+
+## When `sub` itself misbehaves
+
+Capture the task handle and run `sub report <handle>`. Give the resulting command to the user for review; the manager never files the issue itself.
 ";
 
 #[derive(Debug, Clone)]
@@ -378,6 +382,8 @@ mod tests {
             cursor_config: root.path().join("cursor.json"),
             cursor_skills: root.path().join("cursor-skills"),
         };
+        let existing_binary =
+            std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"));
         let missing_binary = onboard_test(
             &[Harness::Claude],
             OnboardContext {
@@ -396,7 +402,7 @@ mod tests {
             OnboardContext {
                 config: &SubConfig::default(),
                 state_dir: root.path(),
-                mcp_binary: Path::new("/bin/true"),
+                mcp_binary: &existing_binary,
                 locations: &locations,
             },
         )
@@ -414,7 +420,7 @@ mod tests {
             OnboardContext {
                 config: &cursor_config,
                 state_dir: root.path(),
-                mcp_binary: Path::new("/bin/true"),
+                mcp_binary: &existing_binary,
                 locations: &locations,
             },
         )

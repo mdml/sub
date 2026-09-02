@@ -6,11 +6,14 @@ fn config_supplies_launch_values_and_explicit_arguments_win() {
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let state = root.path().join("state");
     let config = root.path().join("sub.toml");
+    let configured_binary = existing_binary().to_string_lossy().into_owned();
+    let explicit_binary = env!("CARGO_BIN_EXE_sub").to_owned();
     std::fs::write(
         &config,
         format!(
-            "state_dir = '{}'\n[harnesses.codex]\nbinary = '/bin/true'\nmodel = 'configured-model'\npermission_mode = 'configured-mode'\n",
-            state.display()
+            "state_dir = '{}'\n[harnesses.codex]\nbinary = '{}'\nmodel = 'configured-model'\npermission_mode = 'configured-mode'\n",
+            state.display(),
+            configured_binary
         ),
     )
     .unwrap_or_else(|error| panic!("config: {error}"));
@@ -32,21 +35,21 @@ fn config_supplies_launch_values_and_explicit_arguments_win() {
     };
     for expected in [
         (
-            Vec::<&str>::new(),
-            "/bin/true",
+            Vec::<String>::new(),
+            configured_binary.as_str(),
             "configured-model",
             "configured-mode",
         ),
         (
             vec![
-                "--binary",
-                "/bin/false",
-                "--model",
-                "explicit-model",
-                "--permission-mode",
-                "explicit-mode",
+                "--binary".to_owned(),
+                explicit_binary.clone(),
+                "--model".to_owned(),
+                "explicit-model".to_owned(),
+                "--permission-mode".to_owned(),
+                "explicit-mode".to_owned(),
             ],
-            "/bin/false",
+            explicit_binary.as_str(),
             "explicit-model",
             "explicit-mode",
         ),
@@ -62,7 +65,7 @@ struct LaunchContext<'a> {
     binary: &'a str,
 }
 
-fn assert_launch_config(context: &LaunchContext<'_>, expected: (Vec<&str>, &str, &str, &str)) {
+fn assert_launch_config(context: &LaunchContext<'_>, expected: (Vec<String>, &str, &str, &str)) {
     let (extra, expected_binary, expected_model, expected_mode) = expected;
     let launch = Command::new(context.binary)
         .args(["launch", "--harness", "codex", "--cwd"])

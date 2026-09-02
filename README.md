@@ -65,6 +65,8 @@ target/debug/sub inspect tsk_REPLACE_WITH_HANDLE
 
 The MCP server also exposes `sub_list` and `sub_inspect`. Both surfaces serialize the same SDK shapes. Unsupported usage is null beside `usage_support: false`; it is never reported as zero or estimated.
 
+If `sub` itself misbehaves, `sub report tsk_REPLACE_WITH_HANDLE` prints a scrubbed `gh issue create` command for the user to review. It never submits the issue or accesses credentials. See [`docs/reporting.md`](docs/reporting.md).
+
 ## Build
 
 Requirements: `rustup` (the toolchain in `rust-toolchain.toml` installs itself on first use) and, for the verification tools, [`mise`](https://mise.jdx.dev).

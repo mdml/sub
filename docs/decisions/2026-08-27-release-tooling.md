@@ -1,6 +1,6 @@
 # Release tooling: cargo-dist
 
-Date: 2026-08-27. Status: adopted (configured; nothing published).
+Date: 2026-08-27. Status: adopted, with channel triggering and prerelease publication superseded by [`2026-09-02-release-channels.md`](2026-09-02-release-channels.md).
 
 ## Decision
 

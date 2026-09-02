@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn launch_validates_paths_and_persists_handle() {
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
-    let delegator = Delegator::new(root.path(), "/bin/true");
+    let delegator = Delegator::new(root.path(), fake_binary());
     let mut request = fake_request(root.path(), "replay-minimal");
     request.params.cwd = PathBuf::from("relative");
     assert!(
@@ -66,6 +66,12 @@ fn liveness_rejects_missing_process_identity() {
     assert!(!supervisor_is_alive(&attempt));
     attempt.supervisor_pid = Some(std::process::id());
     assert!(!supervisor_is_alive(&attempt));
+}
+
+#[test]
+fn supervisor_command_invokes_the_executable_directly() {
+    let command = supervisor_command(Path::new("/bin/true"));
+    assert_eq!(command.get_program(), "/bin/true");
 }
 
 #[test]
