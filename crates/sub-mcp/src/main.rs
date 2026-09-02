@@ -323,6 +323,14 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn assert_tool_error(name: &str, args: Value, expected: &str) {
+        let error = call_tool(name, &args)
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{name} error"));
+        assert!(error.contains(expected), "{error}");
+    }
     #[test]
     fn lists_all_beta_tools() {
         let listed = tools();
@@ -409,66 +417,46 @@ mod tests {
     async fn tool_errors_cover_public_argument_shapes() {
         let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
         let root_text = root.path().to_string_lossy();
-        let wait_error = call_tool(
+        assert_tool_error(
             "sub_wait",
-            &json!({"handle":"tsk_000000000000000000000000","timeout_seconds":0,"state_dir":root_text}),
+            json!({"handle":"tsk_000000000000000000000000","timeout_seconds":0,"state_dir":root_text}),
+            "unknown task",
         )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("wait error"));
-        assert!(wait_error.contains("unknown task"));
-        let recover_error = call_tool(
+        .await;
+        assert_tool_error(
             "sub_recover",
-            &json!({"handle":"tsk_000000000000000000000000","state_dir":root_text}),
+            json!({"handle":"tsk_000000000000000000000000","state_dir":root_text}),
+            "unknown task",
         )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("recover error"));
-        assert!(recover_error.contains("unknown task"));
-        let cancel_error = call_tool(
+        .await;
+        assert_tool_error(
             "sub_cancel",
-            &json!({"handle":"tsk_000000000000000000000000","state_dir":root_text}),
+            json!({"handle":"tsk_000000000000000000000000","state_dir":root_text}),
+            "unknown task",
         )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("cancel error"));
-        assert!(cancel_error.contains("unknown task"));
-        let install_error = call_tool(
+        .await;
+        assert_tool_error(
             "sub_bridge_install",
-            &json!({"harness":"unknown","state_dir":root_text}),
+            json!({"harness":"unknown","state_dir":root_text}),
+            "unsupported",
         )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("install error"));
-        assert!(install_error.contains("unsupported"));
-        let unknown_error = call_tool("unknown", &json!({}))
-            .await
-            .err()
-            .unwrap_or_else(|| panic!("unknown error"));
-        assert!(unknown_error.contains("unknown tool"));
-        let missing_binary = call_tool(
+        .await;
+        assert_tool_error("unknown", json!({}), "unknown tool").await;
+        assert_tool_error(
             "sub_launch",
-            &json!({"harness":"codex","prompt":"probe","cwd":root_text}),
+            json!({"harness":"codex","prompt":"probe","cwd":root_text}),
+            "binary is required",
         )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("missing binary"));
-        assert!(missing_binary.contains("binary is required"));
-        let missing_permission = call_tool(
+        .await;
+        assert_tool_error(
             "sub_launch",
-            &json!({"harness":"codex","prompt":"probe","cwd":root_text,"binary":"/bin/true"}),
+            json!({"harness":"codex","prompt":"probe","cwd":root_text,"binary":"/bin/true"}),
+            "permission_mode is required",
         )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("missing permission"));
-        assert!(missing_permission.contains("permission_mode is required"));
+        .await;
         for harness in ["claude", "codex"] {
             let args = json!({"harness":harness,"prompt":"probe","cwd":root_text,"binary":std::env::current_exe().unwrap_or_else(|error| panic!("exe: {error}")),"permission_mode":"agent","state_dir":root_text});
-            let error = call_tool("sub_launch", &args)
-                .await
-                .err()
-                .unwrap_or_else(|| panic!("launch error"));
-            assert!(error.contains("sub bridge install"));
+            assert_tool_error("sub_launch", args, "sub bridge install").await;
         }
         let response = respond(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"sub_wait","arguments":{"handle":"tsk_000000000000000000000000","timeout_seconds":0,"state_dir":root_text}}})).await.unwrap_or_else(|| panic!("response"));
         assert_eq!(response["result"]["isError"], true);

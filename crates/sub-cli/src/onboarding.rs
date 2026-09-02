@@ -40,26 +40,13 @@ pub struct Locations {
 impl Locations {
     pub fn from_environment() -> Result<Self, String> {
         let home = env::var_os("HOME").map(PathBuf::from);
-        let claude_config = env_path("SUB_CLAUDE_CONFIG")
-            .or_else(|| home.as_ref().map(|path| path.join(".claude.json")))
-            .ok_or_else(|| "HOME is unset; set SUB_CLAUDE_CONFIG".to_owned())?;
-        let claude_skills = env_path("SUB_CLAUDE_SKILLS_DIR")
-            .or_else(|| home.as_ref().map(|path| path.join(".claude/skills")))
-            .ok_or_else(|| "HOME is unset; set SUB_CLAUDE_SKILLS_DIR".to_owned())?;
-        let codex_home =
-            env_path("CODEX_HOME").or_else(|| home.as_ref().map(|path| path.join(".codex")));
-        let codex_config = env_path("SUB_CODEX_CONFIG")
-            .or_else(|| codex_home.as_ref().map(|path| path.join("config.toml")))
-            .ok_or_else(|| "HOME is unset; set SUB_CODEX_CONFIG".to_owned())?;
-        let codex_skills = env_path("SUB_CODEX_SKILLS_DIR")
-            .or_else(|| codex_home.map(|path| path.join("skills")))
-            .ok_or_else(|| "HOME is unset; set SUB_CODEX_SKILLS_DIR".to_owned())?;
-        let cursor_config = env_path("SUB_CURSOR_CONFIG")
-            .or_else(|| home.as_ref().map(|path| path.join(".cursor/mcp.json")))
-            .ok_or_else(|| "HOME is unset; set SUB_CURSOR_CONFIG".to_owned())?;
-        let cursor_skills = env_path("SUB_CURSOR_SKILLS_DIR")
-            .or_else(|| home.as_ref().map(|path| path.join(".cursor/skills")))
-            .ok_or_else(|| "HOME is unset; set SUB_CURSOR_SKILLS_DIR".to_owned())?;
+        let claude_config = home_path("SUB_CLAUDE_CONFIG", home.as_ref(), ".claude.json")?;
+        let claude_skills = home_path("SUB_CLAUDE_SKILLS_DIR", home.as_ref(), ".claude/skills")?;
+        let codex_home = env_path("CODEX_HOME").or_else(|| home.as_ref().map(|p| p.join(".codex")));
+        let codex_config = home_path("SUB_CODEX_CONFIG", codex_home.as_ref(), "config.toml")?;
+        let codex_skills = home_path("SUB_CODEX_SKILLS_DIR", codex_home.as_ref(), "skills")?;
+        let cursor_config = home_path("SUB_CURSOR_CONFIG", home.as_ref(), ".cursor/mcp.json")?;
+        let cursor_skills = home_path("SUB_CURSOR_SKILLS_DIR", home.as_ref(), ".cursor/skills")?;
         Ok(Self {
             claude_config,
             claude_skills,
@@ -69,6 +56,12 @@ impl Locations {
             cursor_skills,
         })
     }
+}
+
+fn home_path(name: &str, home: Option<&PathBuf>, suffix: &str) -> Result<PathBuf, String> {
+    env_path(name)
+        .or_else(|| home.map(|path| path.join(suffix)))
+        .ok_or_else(|| format!("HOME is unset; set {name}"))
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -99,21 +92,23 @@ pub struct Report {
     mcp: Action,
 }
 
-pub fn onboard(
-    harnesses: &[Harness],
-    config: &SubConfig,
-    state_dir: &Path,
-    mcp_binary: &Path,
-    locations: &Locations,
-) -> Result<Vec<Report>, String> {
-    if !mcp_binary.is_file() {
+#[derive(Clone, Copy)]
+pub struct OnboardContext<'a> {
+    pub config: &'a SubConfig,
+    pub state_dir: &'a Path,
+    pub mcp_binary: &'a Path,
+    pub locations: &'a Locations,
+}
+
+pub fn onboard(harnesses: &[Harness], context: OnboardContext<'_>) -> Result<Vec<Report>, String> {
+    if !context.mcp_binary.is_file() {
         return Err(format!(
             "sub-mcp binary not found beside sub: {}",
-            mcp_binary.display()
+            context.mcp_binary.display()
         ));
     }
     for &harness in harnesses {
-        if config.harness(harness).is_none() {
+        if context.config.harness(harness).is_none() {
             return Err(format!(
                 "{} is not configured in sub.toml",
                 harness_name(harness)
@@ -122,33 +117,26 @@ pub fn onboard(
     }
     let mut reports = Vec::with_capacity(harnesses.len());
     for &harness in harnesses {
-        reports.push(onboard_harness(
-            harness, config, state_dir, mcp_binary, locations,
-        )?);
+        reports.push(onboard_harness(harness, &context)?);
     }
     Ok(reports)
 }
 
-fn onboard_harness(
-    harness: Harness,
-    config: &SubConfig,
-    state_dir: &Path,
-    mcp_binary: &Path,
-    locations: &Locations,
-) -> Result<Report, String> {
+fn onboard_harness(harness: Harness, context: &OnboardContext<'_>) -> Result<Report, String> {
     let (bridge_status, bridge_path) = match harness {
         Harness::Claude => ensure_bridge(
-            state_dir,
+            context.state_dir,
             sub_adapter_claude::BRIDGE,
             sub_adapter_claude::install_bridge,
         )?,
         Harness::Codex => ensure_bridge(
-            state_dir,
+            context.state_dir,
             sub_adapter_codex::BRIDGE,
             sub_adapter_codex::install_bridge,
         )?,
         Harness::CursorAgent => {
-            let binary = &config
+            let binary = &context
+                .config
                 .harness(Harness::CursorAgent)
                 .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?
                 .binary;
@@ -158,23 +146,32 @@ fn onboard_harness(
     };
     let (skill_path, config_path) = match harness {
         Harness::Claude => (
-            locations.claude_skills.join("sub-delegation/SKILL.md"),
-            &locations.claude_config,
+            context
+                .locations
+                .claude_skills
+                .join("sub-delegation/SKILL.md"),
+            &context.locations.claude_config,
         ),
         Harness::Codex => (
-            locations.codex_skills.join("sub-delegation/SKILL.md"),
-            &locations.codex_config,
+            context
+                .locations
+                .codex_skills
+                .join("sub-delegation/SKILL.md"),
+            &context.locations.codex_config,
         ),
         Harness::CursorAgent => (
-            locations.cursor_skills.join("sub-delegation/SKILL.md"),
-            &locations.cursor_config,
+            context
+                .locations
+                .cursor_skills
+                .join("sub-delegation/SKILL.md"),
+            &context.locations.cursor_config,
         ),
     };
     let skill_status = write_if_changed(&skill_path, DELEGATION_SKILL.as_bytes())?;
     let mcp_status = match harness {
-        Harness::Claude => register_claude(config_path, mcp_binary)?,
-        Harness::Codex => register_codex(config_path, mcp_binary)?,
-        Harness::CursorAgent => register_cursor(config_path, mcp_binary)?,
+        Harness::Claude => register_claude(config_path, context.mcp_binary)?,
+        Harness::Codex => register_codex(config_path, context.mcp_binary)?,
+        Harness::CursorAgent => register_cursor(config_path, context.mcp_binary)?,
     };
     Ok(Report {
         harness: harness_name(harness),
@@ -207,29 +204,21 @@ fn ensure_bridge(
 }
 
 fn register_claude(path: &Path, mcp_binary: &Path) -> Result<Status, String> {
-    let mut root = read_json_object(path)?;
-    let servers = root
-        .entry("mcpServers")
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| format!("{}: mcpServers must be an object", path.display()))?;
-    servers.insert(
-        "sub".to_owned(),
-        json!({"type":"stdio","command":mcp_binary,"args":[]}),
-    );
-    let bytes =
-        serde_json::to_vec_pretty(&Value::Object(root)).map_err(|error| error.to_string())?;
-    write_if_changed(path, &bytes)
+    register_json(path, json!({"type":"stdio","command":mcp_binary,"args":[]}))
 }
 
 fn register_cursor(path: &Path, mcp_binary: &Path) -> Result<Status, String> {
+    register_json(path, json!({"command":mcp_binary,"args":[]}))
+}
+
+fn register_json(path: &Path, server: Value) -> Result<Status, String> {
     let mut root = read_json_object(path)?;
     let servers = root
         .entry("mcpServers")
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or_else(|| format!("{}: mcpServers must be an object", path.display()))?;
-    servers.insert("sub".to_owned(), json!({"command":mcp_binary,"args":[]}));
+    servers.insert("sub".to_owned(), server);
     let bytes =
         serde_json::to_vec_pretty(&Value::Object(root)).map_err(|error| error.to_string())?;
     write_if_changed(path, &bytes)
@@ -311,6 +300,13 @@ const fn harness_name(harness: Harness) -> &'static str {
 mod tests {
     use super::*;
 
+    fn onboard_test(
+        harnesses: &[Harness],
+        context: OnboardContext<'_>,
+    ) -> Result<Vec<Report>, String> {
+        onboard(harnesses, context)
+    }
+
     #[test]
     fn registration_preserves_unrelated_configuration_and_is_idempotent() {
         let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
@@ -382,23 +378,27 @@ mod tests {
             cursor_config: root.path().join("cursor.json"),
             cursor_skills: root.path().join("cursor-skills"),
         };
-        let missing_binary = onboard(
+        let missing_binary = onboard_test(
             &[Harness::Claude],
-            &SubConfig::default(),
-            root.path(),
-            &root.path().join("missing-sub-mcp"),
-            &locations,
+            OnboardContext {
+                config: &SubConfig::default(),
+                state_dir: root.path(),
+                mcp_binary: &root.path().join("missing-sub-mcp"),
+                locations: &locations,
+            },
         )
         .err()
         .unwrap_or_else(|| panic!("missing binary error"));
         assert!(missing_binary.contains("sub-mcp binary not found"));
 
-        let unconfigured = onboard(
+        let unconfigured = onboard_test(
             &[Harness::Claude],
-            &SubConfig::default(),
-            root.path(),
-            Path::new("/bin/true"),
-            &locations,
+            OnboardContext {
+                config: &SubConfig::default(),
+                state_dir: root.path(),
+                mcp_binary: Path::new("/bin/true"),
+                locations: &locations,
+            },
         )
         .err()
         .unwrap_or_else(|| panic!("unconfigured error"));
@@ -409,12 +409,14 @@ mod tests {
             "[harnesses.cursor]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
         )
         .unwrap_or_else(|error| panic!("cursor config: {error}"));
-        let reports = onboard(
+        let reports = onboard_test(
             &[Harness::CursorAgent],
-            &cursor_config,
-            root.path(),
-            Path::new("/bin/true"),
-            &locations,
+            OnboardContext {
+                config: &cursor_config,
+                state_dir: root.path(),
+                mcp_binary: Path::new("/bin/true"),
+                locations: &locations,
+            },
         )
         .unwrap_or_else(|error| panic!("cursor onboard: {error}"));
         assert_eq!(reports[0].bridge.status, Status::NotRequired);

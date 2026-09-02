@@ -187,24 +187,33 @@ fn hash_tree(root: &Path) -> io::Result<String> {
             continue;
         }
         digest.update(relative.to_string_lossy().as_bytes());
-        let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink() {
-            digest.update(b"symlink\0");
-            digest.update(fs::read_link(&path)?.to_string_lossy().as_bytes());
-        } else if metadata.is_file() {
-            digest.update(b"file\0");
-            let mut file = fs::File::open(path)?;
-            let mut buffer = [0_u8; 16 * 1024];
-            loop {
-                let count = file.read(&mut buffer)?;
-                if count == 0 {
-                    break;
-                }
-                digest.update(&buffer[..count]);
-            }
-        }
+        hash_entry(&path, &mut digest)?;
     }
     Ok(hex::encode(digest.finalize()))
+}
+
+fn hash_entry(path: &Path, digest: &mut Sha256) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        digest.update(b"symlink\0");
+        digest.update(fs::read_link(path)?.to_string_lossy().as_bytes());
+    } else if metadata.is_file() {
+        digest.update(b"file\0");
+        hash_file(path, digest)?;
+    }
+    Ok(())
+}
+
+fn hash_file(path: &Path, digest: &mut Sha256) -> io::Result<()> {
+    let mut file = fs::File::open(path)?;
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(());
+        }
+        digest.update(&buffer[..count]);
+    }
 }
 
 fn collect_entries(directory: &Path, entries: &mut Vec<PathBuf>) -> io::Result<()> {

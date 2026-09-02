@@ -38,15 +38,27 @@ struct CursorExtensionResponse(serde_json::Value);
 #[notification(method = "cursor/task")]
 struct CursorTaskNotification(serde_json::Value);
 
+macro_rules! request_handler {
+    ($state:expr, $method:ident) => {{
+        let state = Arc::clone(&$state);
+        async move |request, responder, connection| {
+            state.$method(request, responder, connection).await
+        }
+    }};
+}
+
+macro_rules! notification_handler {
+    ($state:expr, $method:ident) => {{
+        let state = Arc::clone(&$state);
+        async move |notification, connection| state.$method(notification, connection).await
+    }};
+}
+
 /// Run the fake harness agent on stdio using the given scenario and fixture roots.
 ///
 /// # Errors
 ///
 /// Returns [`FakeHarnessError`] when fixtures cannot be loaded or the agent connection fails.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one ACP builder registers the fake's complete protocol surface"
-)]
 pub async fn run_stdio(
     scenarios_root: &Path,
     fixtures_root: &Path,
@@ -65,118 +77,35 @@ pub async fn run_stdio(
         .builder()
         .name("sub-harness-fake")
         .on_receive_request(
-            {
-                let state = Arc::clone(&state);
-                async move |request: InitializeRequest,
-                            responder: Responder<InitializeResponse>,
-                            _connection: ConnectionTo<Client>| {
-                    responder.respond(state.initialize_response(&request))
-                }
-            },
+            request_handler!(state, handle_initialize),
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            {
-                let state = Arc::clone(&state);
-                async move |request: ResumeSessionRequest,
-                            responder: Responder<ResumeSessionResponse>,
-                            _connection: ConnectionTo<Client>| {
-                    match state.resume_session(&request) {
-                        Ok(response) => responder.respond(response),
-                        Err(error) => responder.respond_with_error(error),
-                    }
-                }
-            },
+            request_handler!(state, handle_resume),
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            {
-                let state = Arc::clone(&state);
-                async move |request: LoadSessionRequest,
-                            responder: Responder<LoadSessionResponse>,
-                            connection: ConnectionTo<Client>| {
-                    match state.load_session(&request) {
-                        Ok(updates) => {
-                            for update in updates {
-                                connection.send_notification(update)?;
-                            }
-                            responder.respond(LoadSessionResponse::new())
-                        }
-                        Err(error) => responder.respond_with_error(error),
-                    }
-                }
-            },
+            request_handler!(state, handle_load),
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_request: SetSessionModeRequest,
-                        responder: Responder<SetSessionModeResponse>,
-                        _connection: ConnectionTo<Client>| {
-                responder.respond(SetSessionModeResponse::new())
-            },
+            handle_set_mode,
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_request: SetSessionConfigOptionRequest,
-                        responder: Responder<SetSessionConfigOptionResponse>,
-                        _connection: ConnectionTo<Client>| {
-                responder.respond(SetSessionConfigOptionResponse::new(Vec::new()))
-            },
+            handle_set_config,
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            {
-                let state = Arc::clone(&state);
-                async move |request: NewSessionRequest,
-                            responder: Responder<NewSessionResponse>,
-                            _connection: ConnectionTo<Client>| {
-                    responder.respond(state.new_session_response(request))
-                }
-            },
+            request_handler!(state, handle_new),
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            {
-                let state = Arc::clone(&state);
-                async move |request: PromptRequest,
-                            responder: Responder<PromptResponse>,
-                            connection: ConnectionTo<Client>| {
-                    match state.behavior {
-                        ScenarioBehavior::Hang => {
-                            std::future::pending::<Result<(), agent_client_protocol::Error>>().await
-                        }
-                        ScenarioBehavior::PermissionRequest => {
-                            SharedState::request_permission(request, responder, &connection)
-                        }
-                        ScenarioBehavior::CancelHonored | ScenarioBehavior::IgnoreCancel => {
-                            let prompt_state = Arc::clone(&state);
-                            tokio::spawn(async move {
-                                let _ = prompt_state
-                                    .replay_prompt(request, responder, connection)
-                                    .await;
-                            });
-                            Ok(())
-                        }
-                        ScenarioBehavior::Replay
-                        | ScenarioBehavior::DieMidStream { .. }
-                        | ScenarioBehavior::Malformed { .. }
-                        | ScenarioBehavior::ResumeRefused => {
-                            state.replay_prompt(request, responder, connection).await
-                        }
-                    }
-                }
-            },
+            request_handler!(state, handle_prompt),
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_notification(
-            {
-                let state = Arc::clone(&state);
-                async move |notification: agent_client_protocol::schema::v1::CancelNotification,
-                            _connection: ConnectionTo<Client>| {
-                    state.record_cancel(&notification);
-                    Ok(())
-                }
-            },
+            notification_handler!(state, handle_cancel),
             agent_client_protocol::on_receive_notification!(),
         )
         .connect_to(Stdio::new())
@@ -190,7 +119,93 @@ struct SharedState {
     cancelled: Arc<AtomicBool>,
 }
 
+#[allow(clippy::unused_async)]
 impl SharedState {
+    async fn handle_initialize(
+        &self,
+        request: InitializeRequest,
+        responder: Responder<InitializeResponse>,
+        _connection: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        responder.respond(self.initialize_response(&request))
+    }
+
+    async fn handle_resume(
+        &self,
+        request: ResumeSessionRequest,
+        responder: Responder<ResumeSessionResponse>,
+        _connection: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        match self.resume_session(&request) {
+            Ok(response) => responder.respond(response),
+            Err(error) => responder.respond_with_error(error),
+        }
+    }
+
+    async fn handle_load(
+        &self,
+        request: LoadSessionRequest,
+        responder: Responder<LoadSessionResponse>,
+        connection: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        match self.load_session(&request) {
+            Ok(updates) => {
+                for update in updates {
+                    connection.send_notification(update)?;
+                }
+                responder.respond(LoadSessionResponse::new())
+            }
+            Err(error) => responder.respond_with_error(error),
+        }
+    }
+
+    async fn handle_new(
+        &self,
+        request: NewSessionRequest,
+        responder: Responder<NewSessionResponse>,
+        _connection: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        responder.respond(self.new_session_response(request))
+    }
+
+    async fn handle_prompt(
+        self: &Arc<Self>,
+        request: PromptRequest,
+        responder: Responder<PromptResponse>,
+        connection: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        match self.behavior {
+            ScenarioBehavior::Hang => {
+                std::future::pending::<Result<(), agent_client_protocol::Error>>().await
+            }
+            ScenarioBehavior::PermissionRequest => {
+                Self::request_permission(request, responder, &connection)
+            }
+            ScenarioBehavior::CancelHonored | ScenarioBehavior::IgnoreCancel => {
+                let state = Arc::clone(self);
+                tokio::spawn(async move {
+                    let _ = state.replay_prompt(request, responder, connection).await;
+                });
+                Ok(())
+            }
+            ScenarioBehavior::Replay
+            | ScenarioBehavior::DieMidStream { .. }
+            | ScenarioBehavior::Malformed { .. }
+            | ScenarioBehavior::ResumeRefused => {
+                self.replay_prompt(request, responder, connection).await
+            }
+        }
+    }
+
+    async fn handle_cancel(
+        &self,
+        notification: agent_client_protocol::schema::v1::CancelNotification,
+        _connection: ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        self.record_cancel(&notification);
+        Ok(())
+    }
+
     fn initialize_response(&self, request: &InitializeRequest) -> InitializeResponse {
         let AgentInfo {
             name,
@@ -311,26 +326,19 @@ impl SharedState {
             return responder.respond(PromptResponse::new(StopReason::Refusal));
         }
 
-        let replay_timing = self.fixture.manifest.prompt.replay_timing;
+        self.replay_events(&connection).await?;
+        self.apply_completion_behavior().await;
+
+        responder.respond(self.prompt_response())
+    }
+
+    async fn replay_events(
+        &self,
+        connection: &ConnectionTo<Client>,
+    ) -> Result<(), agent_client_protocol::Error> {
         let mut emitted = 0usize;
-
         for event in &self.fixture.events {
-            if let ScenarioBehavior::DieMidStream { after_events } = self.behavior
-                && emitted >= after_events
-            {
-                std::process::exit(1);
-            }
-
-            if let ScenarioBehavior::Malformed { after_events } = self.behavior
-                && emitted >= after_events
-            {
-                use std::io::Write;
-                let mut stdout = std::io::stdout();
-                let _ = stdout.write_all(b"{ this is not valid json\n");
-                let _ = stdout.flush();
-                std::process::exit(0);
-            }
-
+            terminate_if_scripted(self.behavior, emitted);
             let Some(payload) = &event.notification else {
                 continue;
             };
@@ -339,12 +347,14 @@ impl SharedState {
             }
             connection.send_notification(parse_notification(payload)?)?;
             emitted += 1;
-
-            if replay_timing && event.t_ms > 0 {
+            if self.fixture.manifest.prompt.replay_timing && event.t_ms > 0 {
                 tokio::time::sleep(Duration::from_millis(event.t_ms)).await;
             }
         }
+        Ok(())
+    }
 
+    async fn apply_completion_behavior(&self) {
         if matches!(self.behavior, ScenarioBehavior::CancelHonored) {
             while !self.cancelled.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -353,8 +363,6 @@ impl SharedState {
         if matches!(self.behavior, ScenarioBehavior::IgnoreCancel) {
             std::future::pending::<()>().await;
         }
-
-        responder.respond(self.prompt_response())
     }
 
     fn stop_reason(&self) -> StopReason {
@@ -366,6 +374,42 @@ impl SharedState {
             map_stop_reason(self.fixture.manifest.prompt.stop_reason)
         }
     }
+}
+
+async fn handle_set_mode(
+    _request: SetSessionModeRequest,
+    responder: Responder<SetSessionModeResponse>,
+    _connection: ConnectionTo<Client>,
+) -> Result<(), agent_client_protocol::Error> {
+    responder.respond(SetSessionModeResponse::new())
+}
+
+async fn handle_set_config(
+    _request: SetSessionConfigOptionRequest,
+    responder: Responder<SetSessionConfigOptionResponse>,
+    _connection: ConnectionTo<Client>,
+) -> Result<(), agent_client_protocol::Error> {
+    responder.respond(SetSessionConfigOptionResponse::new(Vec::new()))
+}
+
+fn terminate_if_scripted(behavior: ScenarioBehavior, emitted: usize) {
+    match behavior {
+        ScenarioBehavior::DieMidStream { after_events } if emitted >= after_events => {
+            std::process::exit(1);
+        }
+        ScenarioBehavior::Malformed { after_events } if emitted >= after_events => {
+            emit_malformed_output();
+            std::process::exit(0);
+        }
+        _ => {}
+    }
+}
+
+fn emit_malformed_output() {
+    use std::io::Write;
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(b"{ this is not valid json\n");
+    let _ = stdout.flush();
 }
 
 fn session_unavailable() -> agent_client_protocol::Error {

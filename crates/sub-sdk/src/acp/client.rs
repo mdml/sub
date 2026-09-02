@@ -23,6 +23,9 @@ use super::session::{PromptResult, SessionHandle, SessionStart};
 use super::stop_reason::StopReason;
 use super::update::StreamUpdate;
 
+#[macro_use]
+mod client_api;
+
 #[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcRequest)]
 #[request(method = "cursor/ask_question", response = CursorExtensionResponse)]
 struct CursorAskQuestionRequest(serde_json::Value);
@@ -100,317 +103,374 @@ impl AcpClient {
         self.prompt_turn_observing(cwd, prompt, options, None).await
     }
 
-    /// Run one prompt turn and notify an observer as updates arrive.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AcpError`] when the agent process, negotiation, or turn fails.
-    pub async fn prompt_turn_observing(
-        &self,
-        cwd: impl AsRef<Path>,
-        prompt: &str,
-        options: PromptOptions,
-        observer: Option<UpdateObserver>,
-    ) -> Result<(SessionHandle, PromptResult), AcpError> {
-        self.prompt_turn_observing_session(cwd, prompt, options, observer, None)
-            .await
+    observing_methods!();
+}
+
+macro_rules! request_handler {
+    ($sink:expr, $method:ident) => {{
+        let sink = $sink.clone();
+        async move |request, responder, _connection| sink.$method(request, responder).await
+    }};
+}
+
+macro_rules! notification_handler {
+    ($sink:expr, $method:ident) => {{
+        let sink = $sink.clone();
+        async move |notification, _connection| sink.$method(notification).await
+    }};
+}
+
+struct PromptTurn {
+    cwd: PathBuf,
+    prompt: String,
+    options: PromptOptions,
+    observer: Option<UpdateObserver>,
+    session_observer: Option<SessionObserver>,
+}
+
+#[derive(Clone)]
+struct StreamSink {
+    updates: tokio::sync::mpsc::UnboundedSender<StreamUpdate>,
+    observer: Option<UpdateObserver>,
+    loading_replay: Arc<AtomicBool>,
+}
+
+impl StreamSink {
+    fn send(&self, update: StreamUpdate) -> Result<(), agent_client_protocol::Error> {
+        if let Some(observer) = &self.observer {
+            observer(update.clone());
+        }
+        self.updates
+            .send(update)
+            .map_err(|_| agent_client_protocol::Error::internal_error())
     }
 
-    /// Run one prompt turn and notify observers as the session opens and updates arrive.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AcpError`] when the agent process, negotiation, session open, or turn fails.
-    pub async fn prompt_turn_observing_session(
+    #[allow(clippy::unused_async)]
+    async fn permission(
         &self,
-        cwd: impl AsRef<Path>,
-        prompt: &str,
-        options: PromptOptions,
-        observer: Option<UpdateObserver>,
-        session_observer: Option<SessionObserver>,
-    ) -> Result<(SessionHandle, PromptResult), AcpError> {
-        let run = self.run_prompt_turn(cwd, prompt, &options, observer, session_observer);
-        match options.timeout {
-            Some(duration) => tokio::time::timeout(duration, run)
-                .await
-                .map_err(|_| AcpError::TimedOut(duration))?,
-            None => run.await,
+        request: RequestPermissionRequest,
+        responder: agent_client_protocol::Responder<RequestPermissionResponse>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        self.send(StreamUpdate::permission_denied(&request))?;
+        deny_permission(responder)
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn cursor_question(
+        &self,
+        _request: CursorAskQuestionRequest,
+        responder: agent_client_protocol::Responder<CursorExtensionResponse>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        self.deny_cursor_interaction("ask_question", responder)
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn cursor_plan(
+        &self,
+        _request: CursorCreatePlanRequest,
+        responder: agent_client_protocol::Responder<CursorExtensionResponse>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        self.deny_cursor_interaction("create_plan", responder)
+    }
+
+    fn deny_cursor_interaction(
+        &self,
+        kind: &str,
+        responder: agent_client_protocol::Responder<CursorExtensionResponse>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        if !self.loading_replay.load(Ordering::Acquire) {
+            self.send(StreamUpdate::cursor_interaction_denied(kind))?;
+        }
+        responder.respond(cursor_cancelled_response())
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn session_update(
+        &self,
+        notification: SessionNotification,
+    ) -> Result<(), agent_client_protocol::Error> {
+        if self.loading_replay.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.send(StreamUpdate::from_session_update(&notification.update))
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn cursor_task(
+        &self,
+        _notification: CursorTaskNotification,
+    ) -> Result<(), agent_client_protocol::Error> {
+        if !self.loading_replay.load(Ordering::Acquire) {
+            self.send(StreamUpdate::subagent_observed())?;
+        }
+        Ok(())
+    }
+}
+
+struct ConnectionContext {
+    turn: PromptTurn,
+    result: tokio::sync::oneshot::Sender<(SessionHandle, PromptResult)>,
+    updates: tokio::sync::mpsc::UnboundedReceiver<StreamUpdate>,
+    loading_replay: Arc<AtomicBool>,
+}
+
+async fn run_prompt_turn(
+    client: &AcpClient,
+    turn: PromptTurn,
+) -> Result<(SessionHandle, PromptResult), AcpError> {
+    let client_name = client.config.client_name.clone();
+    let agent = AcpAgent::new(client.launch.clone().into_acp_config());
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+    let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel();
+    let loading_replay = Arc::new(AtomicBool::new(matches!(
+        &turn.options.session_start,
+        SessionStart::Load(_)
+    )));
+    let sink = StreamSink {
+        updates: update_tx,
+        observer: turn.observer.clone(),
+        loading_replay: Arc::clone(&loading_replay),
+    };
+    let context = ConnectionContext {
+        turn,
+        result: result_tx,
+        updates: update_rx,
+        loading_replay,
+    };
+    Client
+        .builder()
+        .name(&client_name)
+        .on_receive_request(
+            request_handler!(sink, permission),
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            request_handler!(sink, cursor_question),
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            request_handler!(sink, cursor_plan),
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_notification(
+            notification_handler!(sink, session_update),
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_notification(
+            notification_handler!(sink, cursor_task),
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, async move |connection| {
+            drive_connection(connection, context).await
+        })
+        .await
+        .map_err(|error| AcpError::protocol(&error))?;
+    result_rx.await.map_err(|_| AcpError::StreamEnded)
+}
+
+async fn drive_connection(
+    connection: ConnectionTo<Agent>,
+    mut context: ConnectionContext,
+) -> Result<(), agent_client_protocol::Error> {
+    connection
+        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+        .block_task()
+        .await?;
+    let session_id = open_session(&connection, &context.turn, &context.loading_replay).await?;
+    let handle = SessionHandle {
+        session_id: session_id.to_string(),
+    };
+    if let Some(observer) = &context.turn.session_observer {
+        observer(&handle.session_id);
+    }
+    configure_session(&connection, &session_id, &context.turn.options).await?;
+    schedule_cancel(&connection, &session_id, context.turn.options.cancel_after);
+    let (response, cancellation_honored) =
+        prompt_agent(&connection, &session_id, &context.turn).await?;
+    let result = collect_result(handle, response, cancellation_honored, &mut context.updates);
+    context
+        .result
+        .send(result)
+        .map_err(|_| agent_client_protocol::Error::internal_error())
+}
+
+async fn open_session(
+    connection: &ConnectionTo<Agent>,
+    turn: &PromptTurn,
+    loading_replay: &AtomicBool,
+) -> Result<agent_client_protocol::schema::v1::SessionId, agent_client_protocol::Error> {
+    let meta = turn
+        .options
+        .session_meta
+        .as_ref()
+        .map(|value| {
+            value
+                .as_object()
+                .cloned()
+                .ok_or_else(agent_client_protocol::Error::invalid_params)
+        })
+        .transpose()?;
+    match &turn.options.session_start {
+        SessionStart::New => {
+            let mut request = NewSessionRequest::new(&turn.cwd);
+            if let Some(meta) = meta {
+                request = request.meta(meta);
+            }
+            Ok(connection
+                .send_request(request)
+                .block_task()
+                .await?
+                .session_id)
+        }
+        SessionStart::Resume(session_id) => {
+            let mut request = ResumeSessionRequest::new(session_id.clone(), &turn.cwd);
+            if let Some(meta) = meta {
+                request = request.meta(meta);
+            }
+            connection.send_request(request).block_task().await?;
+            Ok(session_id.clone().into())
+        }
+        SessionStart::Load(session_id) => {
+            let mut request = LoadSessionRequest::new(session_id.clone(), &turn.cwd);
+            if let Some(meta) = meta {
+                request = request.meta(meta);
+            }
+            connection.send_request(request).block_task().await?;
+            loading_replay.store(false, Ordering::Release);
+            Ok(session_id.clone().into())
         }
     }
+}
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the ACP connection lifecycle must remain inside one connection callback"
-    )]
-    async fn run_prompt_turn(
-        &self,
-        cwd: impl AsRef<Path>,
-        prompt: &str,
-        options: &PromptOptions,
-        observer: Option<UpdateObserver>,
-        session_observer: Option<SessionObserver>,
-    ) -> Result<(SessionHandle, PromptResult), AcpError> {
-        let cwd = cwd.as_ref().to_path_buf();
-        let prompt = prompt.to_owned();
-        let cancel_after = options.cancel_after;
-        let cancellation = options.cancellation.clone();
-        let client_name = self.config.client_name.clone();
-        let agent = AcpAgent::new(self.launch.clone().into_acp_config());
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        let (update_tx, mut update_rx) = tokio::sync::mpsc::unbounded_channel();
-        let loading_replay = Arc::new(AtomicBool::new(matches!(
-            &options.session_start,
-            SessionStart::Load(_)
-        )));
-
-        Client
-            .builder()
-            .name(&client_name)
-            .on_receive_request(
-                {
-                    let update_tx = update_tx.clone();
-                    let observer = observer.clone();
-                    async move |request: RequestPermissionRequest,
-                                responder,
-                                _connection: ConnectionTo<Agent>| {
-                        let update = StreamUpdate::permission_denied(&request);
-                        if let Some(observer) = &observer {
-                            observer(update.clone());
-                        }
-                        update_tx
-                            .send(update)
-                            .map_err(|_| agent_client_protocol::Error::internal_error())?;
-                        deny_permission(responder)
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let update_tx = update_tx.clone();
-                    let observer = observer.clone();
-                    let loading_replay = Arc::clone(&loading_replay);
-                    async move |_request: CursorAskQuestionRequest,
-                                responder,
-                                _connection: ConnectionTo<Agent>| {
-                        if !loading_replay.load(Ordering::Acquire) {
-                            let update = StreamUpdate::cursor_interaction_denied("ask_question");
-                            if let Some(observer) = &observer {
-                                observer(update.clone());
-                            }
-                            update_tx
-                                .send(update)
-                                .map_err(|_| agent_client_protocol::Error::internal_error())?;
-                        }
-                        responder.respond(cursor_cancelled_response())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let update_tx = update_tx.clone();
-                    let observer = observer.clone();
-                    let loading_replay = Arc::clone(&loading_replay);
-                    async move |_request: CursorCreatePlanRequest,
-                                responder,
-                                _connection: ConnectionTo<Agent>| {
-                        if !loading_replay.load(Ordering::Acquire) {
-                            let update = StreamUpdate::cursor_interaction_denied("create_plan");
-                            if let Some(observer) = &observer {
-                                observer(update.clone());
-                            }
-                            update_tx
-                                .send(update)
-                                .map_err(|_| agent_client_protocol::Error::internal_error())?;
-                        }
-                        responder.respond(cursor_cancelled_response())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_notification(
-                {
-                    let update_tx = update_tx.clone();
-                    let observer = observer.clone();
-                    let loading_replay = Arc::clone(&loading_replay);
-                    async move |notification: SessionNotification,
-                                _connection: ConnectionTo<Agent>| {
-                        if loading_replay.load(Ordering::Acquire) {
-                            return Ok(());
-                        }
-                        let update = StreamUpdate::from_session_update(&notification.update);
-                        if let Some(observer) = &observer {
-                            observer(update.clone());
-                        }
-                        update_tx
-                            .send(update)
-                            .map_err(|_| agent_client_protocol::Error::internal_error())
-                    }
-                },
-                agent_client_protocol::on_receive_notification!(),
-            )
-            .on_receive_notification(
-                {
-                    let update_tx = update_tx.clone();
-                    let observer = observer.clone();
-                    let loading_replay = Arc::clone(&loading_replay);
-                    async move |_notification: CursorTaskNotification,
-                                _connection: ConnectionTo<Agent>| {
-                        if !loading_replay.load(Ordering::Acquire) {
-                            let update = StreamUpdate::subagent_observed();
-                            if let Some(observer) = &observer {
-                                observer(update.clone());
-                            }
-                            update_tx
-                                .send(update)
-                                .map_err(|_| agent_client_protocol::Error::internal_error())?;
-                        }
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_notification!(),
-            )
-            .connect_with(agent, async move |connection| {
-                connection
-                    .send_request(InitializeRequest::new(ProtocolVersion::V1))
-                    .block_task()
-                    .await?;
-
-                let meta = options
-                    .session_meta
-                    .as_ref()
-                    .map(|value| {
-                        value
-                            .as_object()
-                            .cloned()
-                            .ok_or_else(agent_client_protocol::Error::invalid_params)
-                    })
-                    .transpose()?;
-                let session_id = match &options.session_start {
-                    SessionStart::New => {
-                        let mut request = NewSessionRequest::new(&cwd);
-                        if let Some(meta) = meta.clone() {
-                            request = request.meta(meta);
-                        }
-                        connection
-                            .send_request(request)
-                            .block_task()
-                            .await?
-                            .session_id
-                    }
-                    SessionStart::Resume(session_id) => {
-                        let mut request = ResumeSessionRequest::new(session_id.clone(), &cwd);
-                        if let Some(meta) = meta.clone() {
-                            request = request.meta(meta);
-                        }
-                        connection.send_request(request).block_task().await?;
-                        session_id.clone().into()
-                    }
-                    SessionStart::Load(session_id) => {
-                        let mut request = LoadSessionRequest::new(session_id.clone(), &cwd);
-                        if let Some(meta) = meta {
-                            request = request.meta(meta);
-                        }
-                        connection.send_request(request).block_task().await?;
-                        loading_replay.store(false, Ordering::Release);
-                        session_id.clone().into()
-                    }
-                };
-                let handle = SessionHandle {
-                    session_id: session_id.to_string(),
-                };
-                if let Some(observer) = &session_observer {
-                    observer(&handle.session_id);
-                }
-
-                if let Some(mode) = &options.permission_mode {
-                    connection
-                        .send_request(SetSessionModeRequest::new(session_id.clone(), mode.clone()))
-                        .block_task()
-                        .await?;
-                }
-                if let Some(model) = &options.model {
-                    connection
-                        .send_request(SetSessionConfigOptionRequest::new(
-                            session_id.clone(),
-                            "model",
-                            model.as_str(),
-                        ))
-                        .block_task()
-                        .await?;
-                }
-
-                if let Some(delay) = cancel_after {
-                    let connection = connection.clone();
-                    let session_id = session_id.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(delay).await;
-                        let _ = connection.send_notification(
-                            agent_client_protocol::schema::v1::CancelNotification::new(session_id),
-                        );
-                    });
-                }
-
-                let prompt_request = connection
-                    .send_request(PromptRequest::new(session_id.clone(), vec![prompt.into()]))
-                    .block_task();
-                tokio::pin!(prompt_request);
-                let (response, cancellation_honored) = if let Some(cancellation) = cancellation {
-                    tokio::select! {
-                        response = &mut prompt_request => (Some(response?), None),
-                        () = wait_for_cancel_request(&cancellation.request_path) => {
-                            connection.send_notification(
-                                agent_client_protocol::schema::v1::CancelNotification::new(session_id),
-                            )?;
-                            match tokio::time::timeout(cancellation.grace_period, &mut prompt_request).await {
-                                Ok(response) => {
-                                    let response = response?;
-                                    let honored = StopReason::from(response.stop_reason) == StopReason::Cancelled;
-                                    (Some(response), Some(honored))
-                                }
-                                Err(_) => (None, Some(false)),
-                            }
-                        }
-                    }
-                } else {
-                    (Some(prompt_request.await?), None)
-                };
-
-                let mut updates = Vec::new();
-                let mut final_text = String::new();
-                while let Ok(update) = update_rx.try_recv() {
-                    if update.kind == super::update::StreamUpdateKind::AgentMessageChunk
-                        && let Some(text) = &update.text
-                    {
-                        final_text.push_str(text);
-                    }
-                    updates.push(update);
-                }
-                let turn_result = (
-                    handle,
-                    PromptResult {
-                        stop_reason: response.as_ref().map_or(StopReason::Cancelled, |response| {
-                            StopReason::from(response.stop_reason)
-                        }),
-                        updates,
-                        final_text,
-                        usage: response.and_then(|response| response.usage.map(Into::into)),
-                        cancellation_honored,
-                    },
-                );
-
-                result_tx
-                    .send(turn_result)
-                    .map_err(|_| agent_client_protocol::Error::internal_error())?;
-
-                Ok(())
-            })
-            .await
-            .map_err(|error| AcpError::protocol(&error))?;
-
-        result_rx.await.map_err(|_| AcpError::StreamEnded)
+async fn configure_session(
+    connection: &ConnectionTo<Agent>,
+    session_id: &agent_client_protocol::schema::v1::SessionId,
+    options: &PromptOptions,
+) -> Result<(), agent_client_protocol::Error> {
+    if let Some(mode) = &options.permission_mode {
+        connection
+            .send_request(SetSessionModeRequest::new(session_id.clone(), mode.clone()))
+            .block_task()
+            .await?;
     }
+    if let Some(model) = &options.model {
+        connection
+            .send_request(SetSessionConfigOptionRequest::new(
+                session_id.clone(),
+                "model",
+                model.as_str(),
+            ))
+            .block_task()
+            .await?;
+    }
+    Ok(())
+}
+
+fn schedule_cancel(
+    connection: &ConnectionTo<Agent>,
+    session_id: &agent_client_protocol::schema::v1::SessionId,
+    delay: Option<Duration>,
+) {
+    if let Some(delay) = delay {
+        let connection = connection.clone();
+        let session_id = session_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = connection.send_notification(
+                agent_client_protocol::schema::v1::CancelNotification::new(session_id),
+            );
+        });
+    }
+}
+
+async fn prompt_agent(
+    connection: &ConnectionTo<Agent>,
+    session_id: &agent_client_protocol::schema::v1::SessionId,
+    turn: &PromptTurn,
+) -> Result<
+    (
+        Option<agent_client_protocol::schema::v1::PromptResponse>,
+        Option<bool>,
+    ),
+    agent_client_protocol::Error,
+> {
+    let prompt_request = connection
+        .send_request(PromptRequest::new(
+            session_id.clone(),
+            vec![turn.prompt.clone().into()],
+        ))
+        .block_task();
+    tokio::pin!(prompt_request);
+    let Some(cancellation) = &turn.options.cancellation else {
+        return Ok((Some(prompt_request.await?), None));
+    };
+    tokio::select! {
+        response = &mut prompt_request => Ok((Some(response?), None)),
+        () = wait_for_cancel_request(&cancellation.request_path) => {
+            connection.send_notification(
+                agent_client_protocol::schema::v1::CancelNotification::new(session_id.clone()),
+            )?;
+            cancellation_response(&mut prompt_request, cancellation.grace_period).await
+        }
+    }
+}
+
+async fn cancellation_response<F>(
+    prompt_request: &mut std::pin::Pin<&mut F>,
+    grace_period: Duration,
+) -> Result<
+    (
+        Option<agent_client_protocol::schema::v1::PromptResponse>,
+        Option<bool>,
+    ),
+    agent_client_protocol::Error,
+>
+where
+    F: std::future::Future<
+            Output = Result<
+                agent_client_protocol::schema::v1::PromptResponse,
+                agent_client_protocol::Error,
+            >,
+        >,
+{
+    match tokio::time::timeout(grace_period, prompt_request).await {
+        Ok(response) => {
+            let response = response?;
+            let honored = StopReason::from(response.stop_reason) == StopReason::Cancelled;
+            Ok((Some(response), Some(honored)))
+        }
+        Err(_) => Ok((None, Some(false))),
+    }
+}
+
+fn collect_result(
+    handle: SessionHandle,
+    response: Option<agent_client_protocol::schema::v1::PromptResponse>,
+    cancellation_honored: Option<bool>,
+    updates_rx: &mut tokio::sync::mpsc::UnboundedReceiver<StreamUpdate>,
+) -> (SessionHandle, PromptResult) {
+    let mut updates = Vec::new();
+    let mut final_text = String::new();
+    while let Ok(update) = updates_rx.try_recv() {
+        if update.kind == super::update::StreamUpdateKind::AgentMessageChunk
+            && let Some(text) = &update.text
+        {
+            final_text.push_str(text);
+        }
+        updates.push(update);
+    }
+    (
+        handle,
+        PromptResult {
+            stop_reason: response
+                .as_ref()
+                .map_or(StopReason::Cancelled, |value| value.stop_reason.into()),
+            updates,
+            final_text,
+            usage: response.and_then(|value| value.usage.map(Into::into)),
+            cancellation_honored,
+        },
+    )
 }
 
 async fn wait_for_cancel_request(path: &Path) {
