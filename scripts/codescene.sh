@@ -27,7 +27,7 @@ else
     if [ ! -x "$CS" ]; then
         mkdir -p "$CS_HOME"
         echo "codescene: installing the CodeScene CLI under $CS_HOME"
-        curl -fsSL https://downloads.codescene.io/enterprise/cli/install-cs-tool.sh | HOME="$CS_HOME" sh
+        curl -fsSL https://downloads.codescene.io/enterprise/cli/install-cs-tool.sh | HOME="$CS_HOME" sh -s -- -y
         CS="$(find "$CS_HOME" -type f -name cs -perm -u+x | head -n 1)"
         [ -n "$CS" ] || {
             echo "codescene: installer did not produce a 'cs' binary under $CS_HOME" >&2
