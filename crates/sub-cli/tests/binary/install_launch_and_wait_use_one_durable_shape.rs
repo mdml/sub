@@ -62,14 +62,9 @@ fn exercise_harness(root: &std::path::Path, binary: &std::path::Path, harness: H
     command
         .args(["launch", "--harness", harness.name(), "--cwd"])
         .arg(root)
-        .args([
-            "--prompt",
-            "bounded probe",
-            "--binary",
-            "/bin/true",
-            "--permission-mode",
-            harness.permission(),
-        ]);
+        .args(["--prompt", "bounded probe", "--binary"])
+        .arg(binary)
+        .args(["--permission-mode", harness.permission()]);
     if matches!(harness, HarnessCase::Codex) {
         command.args(["--model", "test"]);
     }

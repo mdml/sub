@@ -4,6 +4,10 @@ use std::io::Write;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
+fn existing_binary() -> std::path::PathBuf {
+    std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"))
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn rpc_call(
     stdin: &mut std::process::ChildStdin,
