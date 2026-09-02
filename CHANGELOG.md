@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Stamp nightly build checkouts with their prerelease tag version, verify `sub --version` before packaging, and document mise's replacement GitHub backend for Release installs.
 - Make detached supervision and PID-reuse-safe orphan detection uniform across Linux and macOS by using in-process `setsid(2)` and platform process start identities; force-terminate and reap an ignored-cancel child before publishing its cancelled result.
 - Establish `staging`, `main`, and `stable` as development, nightly, and assembled stable channels, with merge-commit promotion into `main`, workflow-owned tags, whole-tree release gates, stable-only Homebrew publishing, and automated release-prep reconciliation to `staging`.
 - Require the full verification gate on every pull request and the fast gate on every branch commit, with CodeScene score 10 enforced for the appropriate changed-file set and mandatory credentials in both CI workflows.
