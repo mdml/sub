@@ -16,7 +16,7 @@ use sub_sdk::acp::{
 };
 use tempfile::TempDir;
 
-const PROMPT: &str = "contract suite probe";
+const PROMPT: &str = "Reply with exactly: contract suite probe complete";
 
 fn client(launch: HarnessLaunch) -> AcpClient {
     AcpClient::new(launch, AcpClientConfig::default())
@@ -85,6 +85,31 @@ async fn launch_and_stream_consumption_recorded_codex_fixture() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn recorded_cursor_fixture_has_activity_without_usage() {
+    let harness = ContractHarness::select(FakeScenario::ReplayCursor);
+    let (_handle, result) = prompt(
+        &harness,
+        PromptOptions {
+            timeout: Some(Duration::from_secs(30)),
+            ..PromptOptions::default()
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prompt turn: {error}"));
+
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert!(result.updates.len() > 10);
+    assert!(
+        result
+            .updates
+            .iter()
+            .any(|update| update.kind == StreamUpdateKind::ToolCall)
+    );
+    assert_eq!(result.usage, None);
+    assert!(result.updates.iter().all(|update| update.cost.is_none()));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn permission_request_is_denied_and_surfaced() {
     let harness = ContractHarness::select(FakeScenario::PermissionRequest);
     let (_handle, result) = prompt(
@@ -104,6 +129,29 @@ async fn permission_request_is_denied_and_surfaced() {
         .find(|update| update.kind == StreamUpdateKind::PermissionDenied)
         .unwrap_or_else(|| panic!("permission denial update"));
     assert_eq!(denial.text.as_deref(), Some("Write fixture output"));
+    let denied = result
+        .updates
+        .iter()
+        .filter(|update| update.kind == StreamUpdateKind::PermissionDenied)
+        .filter_map(|update| update.text.as_deref())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        denied,
+        [
+            "Write fixture output",
+            "cursor/ask_question",
+            "cursor/create_plan"
+        ]
+    );
+    let subagent = result
+        .updates
+        .iter()
+        .find(|update| {
+            update.kind == StreamUpdateKind::ToolCall && update.text.as_deref() == Some("subagent")
+        })
+        .unwrap_or_else(|| panic!("subagent observation"));
+    assert!(subagent.changed_files.is_empty());
+    assert!(subagent.cost.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -258,13 +306,13 @@ async fn resume_refused_by_harness_is_an_error() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn load_replays_session_updates_before_continuation() {
+async fn load_replay_updates_are_not_counted_as_continuation_updates() {
     if real_harness_enabled() {
         return;
     }
     let harness = ContractHarness::select(FakeScenario::ReplayMinimal);
     let cwd = TempDir::new().unwrap_or_else(|error| panic!("tempdir: {error}"));
-    let (handle, _) = client(harness.launch())
+    let (handle, initial_result) = client(harness.launch())
         .prompt_turn(cwd.path(), PROMPT, PromptOptions::default())
         .await
         .unwrap_or_else(|error| panic!("initial turn: {error}"));
@@ -284,7 +332,51 @@ async fn load_replays_session_updates_before_continuation() {
         .iter()
         .filter(|update| update.kind == StreamUpdateKind::AgentMessageChunk)
         .count();
-    assert!(message_chunks >= 2, "load replay plus continuation stream");
+    let initial_message_chunks = initial_result
+        .updates
+        .iter()
+        .filter(|update| update.kind == StreamUpdateKind::AgentMessageChunk)
+        .count();
+    assert_eq!(
+        message_chunks, initial_message_chunks,
+        "only the continuation stream is observed"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn load_replay_usage_is_not_counted_twice() {
+    if real_harness_enabled() {
+        return;
+    }
+    let harness = ContractHarness::select(FakeScenario::ReplayUsage);
+    let cwd = TempDir::new().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let (handle, initial_result) = client(harness.launch())
+        .prompt_turn(cwd.path(), PROMPT, PromptOptions::default())
+        .await
+        .unwrap_or_else(|error| panic!("initial turn: {error}"));
+    let (_, result) = client(harness.launch())
+        .prompt_turn(
+            cwd.path(),
+            "continue",
+            PromptOptions {
+                session_start: SessionStart::Load(handle.session_id),
+                ..PromptOptions::default()
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("loaded turn: {error}"));
+    let cost_updates = result
+        .updates
+        .iter()
+        .filter(|update| update.cost.is_some())
+        .count();
+    let initial_cost_updates = initial_result
+        .updates
+        .iter()
+        .filter(|update| update.cost.is_some())
+        .count();
+    assert_eq!(cost_updates, initial_cost_updates);
+    assert_eq!(result.usage, initial_result.usage);
 }
 
 /// Run the full contract suite against the harness selected by environment.
@@ -316,7 +408,11 @@ async fn real_harness_mode_entrypoint() {
             "Continue the contract probe and reply briefly.",
             PromptOptions {
                 timeout: Some(Duration::from_mins(2)),
-                session_start: SessionStart::Resume(handle.session_id.clone()),
+                session_start: if harness.real_name() == Some("cursor-agent") {
+                    SessionStart::Load(handle.session_id.clone())
+                } else {
+                    SessionStart::Resume(handle.session_id.clone())
+                },
                 ..PromptOptions::default()
             },
         )
@@ -358,6 +454,13 @@ async fn real_harness_mode_entrypoint() {
             assert!(
                 result.updates.iter().all(|update| update.cost.is_none()),
                 "codex should not report cost"
+            );
+        }
+        Some("cursor-agent") => {
+            assert_eq!(result.usage, None, "cursor should not report token usage");
+            assert!(
+                result.updates.iter().all(|update| update.cost.is_none()),
+                "cursor should not report cost"
             );
         }
         Some(other) => panic!("real harness outside Observe scope: {other}"),

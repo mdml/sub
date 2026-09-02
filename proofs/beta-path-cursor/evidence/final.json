@@ -1,0 +1,25 @@
+{
+  "cancel": {"handle": {"id": "$HANDLE"}, "attempt": 2, "delivery": "delivered"},
+  "wait": {
+    "state": "complete",
+    "result": {
+      "status": "cancelled",
+      "summary_excerpt": "Continuing from 1001 (after 1–1000 in the prior attempt)",
+      "harness_session_id": "$CURSOR_SESSION_ID"
+    }
+  },
+  "task": {
+    "harness": "cursor",
+    "status": "cancelled",
+    "usage_support": {"cost": false, "tokens": false},
+    "usage": {"cost": null, "tokens": null}
+  },
+  "attempts": [
+    {"number": 1, "status": "orphaned", "harness_session_id": "$CURSOR_SESSION_ID", "usage": {"cost": null, "tokens": null}},
+    {"number": 2, "status": "cancelled", "harness_session_id": "$CURSOR_SESSION_ID", "usage": {"cost": null, "tokens": null}}
+  ],
+  "terminal_events": [
+    {"kind": "attempt_cancelled", "harness_honored": true},
+    {"kind": "attempt_finished", "status": "cancelled"}
+  ]
+}

@@ -33,6 +33,8 @@ pub struct Locations {
     claude_skills: PathBuf,
     codex_config: PathBuf,
     codex_skills: PathBuf,
+    cursor_config: PathBuf,
+    cursor_skills: PathBuf,
 }
 
 impl Locations {
@@ -52,11 +54,19 @@ impl Locations {
         let codex_skills = env_path("SUB_CODEX_SKILLS_DIR")
             .or_else(|| codex_home.map(|path| path.join("skills")))
             .ok_or_else(|| "HOME is unset; set SUB_CODEX_SKILLS_DIR".to_owned())?;
+        let cursor_config = env_path("SUB_CURSOR_CONFIG")
+            .or_else(|| home.as_ref().map(|path| path.join(".cursor/mcp.json")))
+            .ok_or_else(|| "HOME is unset; set SUB_CURSOR_CONFIG".to_owned())?;
+        let cursor_skills = env_path("SUB_CURSOR_SKILLS_DIR")
+            .or_else(|| home.as_ref().map(|path| path.join(".cursor/skills")))
+            .ok_or_else(|| "HOME is unset; set SUB_CURSOR_SKILLS_DIR".to_owned())?;
         Ok(Self {
             claude_config,
             claude_skills,
             codex_config,
             codex_skills,
+            cursor_config,
+            cursor_skills,
         })
     }
 }
@@ -72,6 +82,7 @@ enum Status {
     Updated,
     Installed,
     Unchanged,
+    NotRequired,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,13 +122,16 @@ pub fn onboard(
     }
     let mut reports = Vec::with_capacity(harnesses.len());
     for &harness in harnesses {
-        reports.push(onboard_harness(harness, state_dir, mcp_binary, locations)?);
+        reports.push(onboard_harness(
+            harness, config, state_dir, mcp_binary, locations,
+        )?);
     }
     Ok(reports)
 }
 
 fn onboard_harness(
     harness: Harness,
+    config: &SubConfig,
     state_dir: &Path,
     mcp_binary: &Path,
     locations: &Locations,
@@ -133,6 +147,14 @@ fn onboard_harness(
             sub_adapter_codex::BRIDGE,
             sub_adapter_codex::install_bridge,
         )?,
+        Harness::CursorAgent => {
+            let binary = &config
+                .harness(Harness::CursorAgent)
+                .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?
+                .binary;
+            let bridge = sub_adapter_cursor::install_bridge(binary);
+            (Status::NotRequired, bridge.binary)
+        }
     };
     let (skill_path, config_path) = match harness {
         Harness::Claude => (
@@ -143,11 +165,16 @@ fn onboard_harness(
             locations.codex_skills.join("sub-delegation/SKILL.md"),
             &locations.codex_config,
         ),
+        Harness::CursorAgent => (
+            locations.cursor_skills.join("sub-delegation/SKILL.md"),
+            &locations.cursor_config,
+        ),
     };
     let skill_status = write_if_changed(&skill_path, DELEGATION_SKILL.as_bytes())?;
     let mcp_status = match harness {
         Harness::Claude => register_claude(config_path, mcp_binary)?,
         Harness::Codex => register_codex(config_path, mcp_binary)?,
+        Harness::CursorAgent => register_cursor(config_path, mcp_binary)?,
     };
     Ok(Report {
         harness: harness_name(harness),
@@ -190,6 +217,19 @@ fn register_claude(path: &Path, mcp_binary: &Path) -> Result<Status, String> {
         "sub".to_owned(),
         json!({"type":"stdio","command":mcp_binary,"args":[]}),
     );
+    let bytes =
+        serde_json::to_vec_pretty(&Value::Object(root)).map_err(|error| error.to_string())?;
+    write_if_changed(path, &bytes)
+}
+
+fn register_cursor(path: &Path, mcp_binary: &Path) -> Result<Status, String> {
+    let mut root = read_json_object(path)?;
+    let servers = root
+        .entry("mcpServers")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| format!("{}: mcpServers must be an object", path.display()))?;
+    servers.insert("sub".to_owned(), json!({"command":mcp_binary,"args":[]}));
     let bytes =
         serde_json::to_vec_pretty(&Value::Object(root)).map_err(|error| error.to_string())?;
     write_if_changed(path, &bytes)
@@ -263,6 +303,7 @@ const fn harness_name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "claude",
         Harness::Codex => "codex",
+        Harness::CursorAgent => "cursor",
     }
 }
 
@@ -338,6 +379,8 @@ mod tests {
             claude_skills: root.path().join("claude-skills"),
             codex_config: root.path().join("codex.toml"),
             codex_skills: root.path().join("codex-skills"),
+            cursor_config: root.path().join("cursor.json"),
+            cursor_skills: root.path().join("cursor-skills"),
         };
         let missing_binary = onboard(
             &[Harness::Claude],
@@ -361,6 +404,27 @@ mod tests {
         .unwrap_or_else(|| panic!("unconfigured error"));
         assert!(unconfigured.contains("not configured"));
         assert!(!locations.claude_config.exists());
+
+        let cursor_config: SubConfig = toml::from_str(
+            "[harnesses.cursor]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
+        )
+        .unwrap_or_else(|error| panic!("cursor config: {error}"));
+        let reports = onboard(
+            &[Harness::CursorAgent],
+            &cursor_config,
+            root.path(),
+            Path::new("/bin/true"),
+            &locations,
+        )
+        .unwrap_or_else(|error| panic!("cursor onboard: {error}"));
+        assert_eq!(reports[0].bridge.status, Status::NotRequired);
+        assert!(locations.cursor_config.is_file());
+        assert!(
+            locations
+                .cursor_skills
+                .join("sub-delegation/SKILL.md")
+                .is_file()
+        );
     }
 
     #[test]
@@ -372,6 +436,10 @@ mod tests {
         fs::write(&claude, r#"{"mcpServers":"wrong"}"#)
             .unwrap_or_else(|error| panic!("write: {error}"));
         assert!(register_claude(&claude, Path::new("/bin/sub-mcp")).is_err());
+        let cursor = root.path().join("cursor.json");
+        fs::write(&cursor, r#"{"mcpServers":"wrong"}"#)
+            .unwrap_or_else(|error| panic!("write: {error}"));
+        assert!(register_cursor(&cursor, Path::new("/bin/sub-mcp")).is_err());
 
         let codex = root.path().join("config.toml");
         fs::write(&codex, "not valid = [").unwrap_or_else(|error| panic!("write: {error}"));

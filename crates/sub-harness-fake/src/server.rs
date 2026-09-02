@@ -15,12 +15,28 @@ use agent_client_protocol::schema::v1::{
     ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo, Responder, Stdio};
+use serde::{Deserialize, Serialize};
 
 use crate::fixture::{AgentInfo, LoadedFixture};
 use crate::scenario::{Scenario, ScenarioBehavior};
 use sub_sdk::acp::StopReason as SubStopReason;
 
 use crate::FakeHarnessError;
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcRequest)]
+#[request(method = "cursor/ask_question", response = CursorExtensionResponse)]
+struct CursorAskQuestionRequest(serde_json::Value);
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcRequest)]
+#[request(method = "cursor/create_plan", response = CursorExtensionResponse)]
+struct CursorCreatePlanRequest(serde_json::Value);
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcResponse)]
+struct CursorExtensionResponse(serde_json::Value);
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcNotification)]
+#[notification(method = "cursor/task")]
+struct CursorTaskNotification(serde_json::Value);
 
 /// Run the fake harness agent on stdio using the given scenario and fixture roots.
 ///
@@ -258,13 +274,30 @@ impl SharedState {
         connection: &ConnectionTo<Client>,
     ) -> Result<(), agent_client_protocol::Error> {
         let permission = permission_request(request.session_id);
+        let connection = connection.clone();
         connection
+            .clone()
             .send_request(permission)
             .on_receiving_result(async move |result| {
                 let response = result?;
-                responder.respond(PromptResponse::new(permission_stop_reason(
-                    &response.outcome,
-                )))
+                connection
+                    .clone()
+                    .send_request(CursorAskQuestionRequest(serde_json::Value::Null))
+                    .on_receiving_result(async move |result| {
+                        result?;
+                        connection
+                            .clone()
+                            .send_request(CursorCreatePlanRequest(serde_json::Value::Null))
+                            .on_receiving_result(async move |result| {
+                                result?;
+                                connection.send_notification(CursorTaskNotification(
+                                    serde_json::Value::Null,
+                                ))?;
+                                responder.respond(PromptResponse::new(permission_stop_reason(
+                                    &response.outcome,
+                                )))
+                            })
+                    })
             })
     }
 
@@ -282,10 +315,6 @@ impl SharedState {
         let mut emitted = 0usize;
 
         for event in &self.fixture.events {
-            if event.kind != "session/update" {
-                continue;
-            }
-
             if let ScenarioBehavior::DieMidStream { after_events } = self.behavior
                 && emitted >= after_events
             {
@@ -302,15 +331,17 @@ impl SharedState {
                 std::process::exit(0);
             }
 
-            if let Some(notification_value) = &event.notification {
-                let notification = parse_notification(notification_value)?;
-                connection.send_notification(notification)?;
+            let Some(payload) = &event.notification else {
+                continue;
+            };
+            if event.kind != "session/update" {
+                continue;
+            }
+            connection.send_notification(parse_notification(payload)?)?;
+            emitted += 1;
 
-                emitted += 1;
-
-                if replay_timing && event.t_ms > 0 {
-                    tokio::time::sleep(Duration::from_millis(event.t_ms)).await;
-                }
+            if replay_timing && event.t_ms > 0 {
+                tokio::time::sleep(Duration::from_millis(event.t_ms)).await;
             }
         }
 
@@ -559,6 +590,72 @@ mod tests {
             PermissionOptionId::new("allow-once"),
         ));
         assert_eq!(permission_stop_reason(&selected), StopReason::Refusal);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn permission_flow_exercises_cursor_extensions() {
+        let saw_task = Arc::new(AtomicBool::new(false));
+        let agent = Agent.builder().on_receive_request(
+            async move |request: PromptRequest,
+                        responder: Responder<PromptResponse>,
+                        connection: ConnectionTo<Client>| {
+                SharedState::request_permission(request, responder, &connection)
+            },
+            agent_client_protocol::on_receive_request!(),
+        );
+        let client = Client
+            .builder()
+            .on_receive_request(
+                async move |_request: RequestPermissionRequest,
+                            responder,
+                            _connection: ConnectionTo<Agent>| {
+                    responder.respond(
+                        agent_client_protocol::schema::v1::RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Cancelled,
+                        ),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_request: CursorAskQuestionRequest,
+                            responder,
+                            _connection: ConnectionTo<Agent>| {
+                    responder.respond(CursorExtensionResponse(serde_json::Value::Null))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_request: CursorCreatePlanRequest,
+                            responder,
+                            _connection: ConnectionTo<Agent>| {
+                    responder.respond(CursorExtensionResponse(serde_json::Value::Null))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_notification(
+                {
+                    let saw_task = Arc::clone(&saw_task);
+                    async move |_notification: CursorTaskNotification,
+                                _connection: ConnectionTo<Agent>| {
+                        saw_task.store(true, Ordering::SeqCst);
+                        Ok(())
+                    }
+                },
+                agent_client_protocol::on_receive_notification!(),
+            );
+        client
+            .connect_with(agent, async move |connection| {
+                let response = connection
+                    .send_request(PromptRequest::new("session", vec!["probe".into()]))
+                    .block_task()
+                    .await?;
+                assert_eq!(response.stop_reason, StopReason::EndTurn);
+                Ok(())
+            })
+            .await
+            .unwrap_or_else(|error| panic!("permission flow: {error}"));
+        assert!(saw_task.load(Ordering::SeqCst));
     }
 
     #[test]

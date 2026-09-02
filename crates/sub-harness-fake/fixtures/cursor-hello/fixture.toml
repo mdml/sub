@@ -1,0 +1,18 @@
+events = "events.jsonl"
+
+[source]
+kind = "recorded"
+harness = "cursor-agent"
+version = "2026.08.25-3e8eec8"
+
+[agent]
+name = "cursor-agent"
+title = "Cursor Agent"
+version = "2026.08.25-3e8eec8"
+
+[session]
+session_id = "cursor-fixture-session"
+
+[prompt]
+stop_reason = "end_turn"
+replay_timing = false

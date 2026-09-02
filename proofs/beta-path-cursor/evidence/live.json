@@ -1,0 +1,13 @@
+{
+  "task": {
+    "handle": {"id": "$HANDLE"},
+    "harness": "cursor",
+    "status": "running",
+    "usage_support": {"cost": false, "tokens": false},
+    "usage": {"cost": null, "tokens": null}
+  },
+  "attempts": [
+    {"number": 1, "status": "running", "harness_session_id": "$CURSOR_SESSION_ID", "usage": {"cost": null, "tokens": null}}
+  ],
+  "observed_events": ["task_created", "attempt_started", "activity:session_info", "activity:thought", "activity:message"]
+}

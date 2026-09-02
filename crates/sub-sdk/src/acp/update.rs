@@ -79,6 +79,24 @@ impl StreamUpdate {
         }
     }
 
+    pub(crate) fn cursor_interaction_denied(kind: &str) -> Self {
+        Self {
+            kind: StreamUpdateKind::PermissionDenied,
+            text: Some(format!("cursor/{kind}")),
+            changed_files: Vec::new(),
+            cost: None,
+        }
+    }
+
+    pub(crate) fn subagent_observed() -> Self {
+        Self {
+            kind: StreamUpdateKind::ToolCall,
+            text: Some("subagent".to_owned()),
+            changed_files: Vec::new(),
+            cost: None,
+        }
+    }
+
     pub(crate) fn from_session_update(
         update: &agent_client_protocol::schema::v1::SessionUpdate,
     ) -> Self {

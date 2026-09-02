@@ -1,0 +1,11 @@
+{
+  "cursor-agent": "2026.08.25-3e8eec8",
+  "real_harness_contract": "passed",
+  "covered": ["launch", "stream", "session/load", "cancel", "usage_absence"],
+  "fake_divergences": [
+    {
+      "observed": "Cursor did not complete the vague prompt `contract suite probe` within 120 seconds; the fake completed it.",
+      "resolution": "The shared real-contract prompt now requests one exact no-tool response. The fake and Cursor both complete it."
+    }
+  ]
+}

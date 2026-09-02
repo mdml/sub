@@ -12,6 +12,8 @@ use super::fake_binary;
 pub enum FakeScenario {
     ReplayMinimal,
     ReplayCodex,
+    ReplayCursor,
+    ReplayUsage,
     Hang,
     DieMidStream,
     IgnoreCancel,
@@ -26,6 +28,8 @@ impl FakeScenario {
         match self {
             Self::ReplayMinimal => "replay-minimal",
             Self::ReplayCodex => "replay-codex",
+            Self::ReplayCursor => "replay-cursor",
+            Self::ReplayUsage => "replay-usage",
             Self::Hang => "hang",
             Self::DieMidStream => "die-mid-stream",
             Self::IgnoreCancel => "ignore-cancel",

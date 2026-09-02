@@ -53,6 +53,12 @@ fn adapter(harness: Harness, root: &Path, binary: &Path) -> Result<AdapterLaunch
             delegation_guard: sub_adapter_codex::DELEGATION_GUARD.to_owned(),
             resume_mechanism: sub_adapter_codex::RESUME_MECHANISM,
         }),
+        Harness::CursorAgent => Ok(AdapterLaunch {
+            bridge: sub_adapter_cursor::launch(binary),
+            session_meta: sub_adapter_cursor::session_meta(),
+            delegation_guard: sub_adapter_cursor::DELEGATION_GUARD.to_owned(),
+            resume_mechanism: sub_adapter_cursor::RESUME_MECHANISM,
+        }),
     }
 }
 
@@ -60,6 +66,7 @@ fn parse_harness(value: &str) -> Result<Harness, String> {
     match value {
         "claude" => Ok(Harness::Claude),
         "codex" => Ok(Harness::Codex),
+        "cursor" => Ok(Harness::CursorAgent),
         _ => Err(format!("unsupported harness: {value}")),
     }
 }
@@ -111,6 +118,7 @@ const fn harness_name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "claude",
         Harness::Codex => "codex",
+        Harness::CursorAgent => "cursor",
     }
 }
 
@@ -123,7 +131,7 @@ fn onboarding_harnesses(args: &[String]) -> Result<Vec<Harness>, String> {
         }
     }
     if harnesses.is_empty() {
-        return Err("usage: sub onboard <claude|codex>... [--state-dir PATH]".to_owned());
+        return Err("usage: sub onboard <claude|codex|cursor>... [--state-dir PATH]".to_owned());
     }
     Ok(harnesses)
 }
@@ -209,22 +217,36 @@ async fn supervise(args: &[String]) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
+fn bridge_install_output(harness: &str, root: &Path, config: &SubConfig) -> Result<String, String> {
+    match harness {
+        "claude" => sub_adapter_claude::install_bridge(root)
+            .map(|path| path.display().to_string())
+            .map_err(|error| error.to_string()),
+        "codex" => sub_adapter_codex::install_bridge(root)
+            .map(|path| path.display().to_string())
+            .map_err(|error| error.to_string()),
+        "cursor" => {
+            let configured = config
+                .harness(Harness::CursorAgent)
+                .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?;
+            Ok(sub_adapter_cursor::install_bridge(&configured.binary)
+                .message
+                .to_owned())
+        }
+        _ => Err(format!("unsupported harness: {harness}")),
+    }
+}
+
 async fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("bridge") if args.get(1).map(String::as_str) == Some("install") => {
             let harness = args.get(2).ok_or_else(|| {
-                "usage: sub bridge install <claude|codex> [--state-dir PATH]".to_owned()
+                "usage: sub bridge install <claude|codex|cursor> [--state-dir PATH]".to_owned()
             })?;
             let loaded = config()?;
             let root = state_dir(&args, &loaded.config)?;
-            let binary = match harness.as_str() {
-                "claude" => sub_adapter_claude::install_bridge(&root),
-                "codex" => sub_adapter_codex::install_bridge(&root),
-                _ => return Err(format!("unsupported harness: {harness}")),
-            }
-            .map_err(|error| error.to_string())?;
-            println!("{}", binary.display());
+            println!("{}", bridge_install_output(harness, &root, &loaded.config)?);
         }
         Some("launch") => {
             let loaded = config()?;
@@ -330,7 +352,27 @@ mod tests {
     fn parses_supported_harnesses() {
         assert_eq!(parse_harness("claude"), Ok(Harness::Claude));
         assert_eq!(parse_harness("codex"), Ok(Harness::Codex));
-        assert!(parse_harness("cursor").is_err());
+        assert_eq!(parse_harness("cursor"), Ok(Harness::CursorAgent));
+        let config: SubConfig = toml::from_str(
+            "[harnesses.cursor]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
+        )
+        .unwrap_or_else(|error| panic!("config: {error}"));
+        assert!(
+            bridge_install_output("cursor", Path::new("/unused"), &config)
+                .is_ok_and(|message| message.contains("no bridge"))
+        );
+        let prepared = adapter(
+            Harness::CursorAgent,
+            Path::new("/unused"),
+            Path::new("/bin/cursor-agent"),
+        )
+        .unwrap_or_else(|error| panic!("cursor adapter: {error}"));
+        assert_eq!(prepared.bridge.command(), Path::new("/bin/cursor-agent"));
+        assert_eq!(prepared.bridge.args(), &["acp"]);
+        assert_eq!(
+            prepared.resume_mechanism,
+            sub_sdk::delegation::ResumeMechanism::Load
+        );
     }
 
     #[test]
@@ -386,6 +428,7 @@ mod tests {
                 .is_some_and(|error| error.contains("--permission-mode is required"))
         );
         assert_eq!(harness_name(Harness::Claude), "claude");
+        assert_eq!(harness_name(Harness::CursorAgent), "cursor");
         assert_eq!(
             mcp_binary()
                 .unwrap_or_else(|error| panic!("mcp binary: {error}"))
