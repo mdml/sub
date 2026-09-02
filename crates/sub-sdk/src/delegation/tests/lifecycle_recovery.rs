@@ -27,7 +27,8 @@ fn recover_creates_a_sequential_attempt_for_the_recorded_session() {
     )
     .unwrap_or_else(|error| panic!("task: {error}"));
 
-    let recovered = Delegator::new(root.path(), "/bin/true")
+    let supervisor = fake_binary();
+    let recovered = Delegator::new(root.path(), &supervisor)
         .recover(&handle)
         .unwrap_or_else(|error| panic!("recover: {error}"));
     assert_eq!(recovered.handle, handle);
@@ -45,7 +46,7 @@ fn recover_creates_a_sequential_attempt_for_the_recorded_session() {
             .iter()
             .any(|event| matches!(event.kind, TaskEventKind::AttemptOrphaned))
     );
-    let error = Delegator::new(root.path(), "/bin/true")
+    let error = Delegator::new(root.path(), supervisor)
         .recover(&handle)
         .err()
         .unwrap_or_else(|| panic!("queued attempt must not be recoverable"));
