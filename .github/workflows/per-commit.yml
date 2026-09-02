@@ -6,6 +6,13 @@ on:
     branches: [staging]
   push:
     branches-ignore: [main, staging]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base branch for an explicitly dispatched full gate
+        required: true
+        default: staging
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +43,10 @@ jobs:
       - if: github.event_name == 'pull_request'
         env:
           SUB_VERIFY_BASE: origin/${{ github.base_ref }}
+        run: scripts/verify.sh --full
+      - if: github.event_name == 'workflow_dispatch'
+        env:
+          SUB_VERIFY_BASE: origin/${{ inputs.base }}
         run: scripts/verify.sh --full
 
   macos-tests:

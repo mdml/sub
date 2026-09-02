@@ -31,3 +31,5 @@ One file per repository-level decision, named `YYYY-MM-DD-<slug>.md`. Each state
 | 2026-09-02 | [CodeScene-scoped commit and pull-request verification gates](2026-09-02-verification-gates.md) |
 | 2026-09-02 | [Portable Unix supervisor detachment and identity](2026-09-02-portable-unix-supervision.md) |
 | 2026-09-02 | [Owned process-group termination after cancellation grace](2026-09-02-cancel-force-termination.md) |
+| 2026-09-02 | [Nightly and stable release mechanics](2026-09-02-release-channels.md) |
+| 2026-09-02 | [Scrubbed issue-report drafts](2026-09-02-report-drafts.md) |

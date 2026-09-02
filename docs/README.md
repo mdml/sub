@@ -15,3 +15,4 @@ Product intent, decided boundaries, beta scope, and the proofs that gate release
 | [`proofs/`](proofs/) | Re-runnable feature-proof scenarios; captured evidence lives separately under the repository's top-level `proofs/`. |
 | [`scenarios/`](scenarios/) | Re-runnable non-gating product scenarios; scrubbed evidence lives under the repository's top-level `scenarios/`. |
 | [`release.md`](release.md) | How releases will be built, signed, and published. |
+| [`reporting.md`](reporting.md) | How users draft scrubbed reports and how stable candidates flow into promotion. |
