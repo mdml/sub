@@ -23,6 +23,12 @@ install-updater = false
 checksum = "sha256"
 # Sign and attest artifacts with GitHub artifact attestations (Sigstore, keyless)
 github-attestations = true
+# Stable promotion creates its tag over SSH with the release deploy key and
+# explicitly dispatches this workflow so nightly tags never invoke cargo-dist.
+dispatch-releases = true
+# Nightlies use their own GitHub-prerelease workflow; package-manager publishing
+# is reserved for stable cargo-dist tags.
+publish-prereleases = false
 # Homebrew tap that receives the generated formula. The tap repository must
 # exist and a HOMEBREW_TAP_TOKEN secret must be set before the first release.
 tap = "mdml/homebrew-tap"

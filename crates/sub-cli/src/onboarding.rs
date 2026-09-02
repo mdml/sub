@@ -25,6 +25,10 @@ Use `sub` when a bounded task benefits from parallel work, another harness, or i
 4. If inspection or wait reports `orphaned`, call `sub_recover` once, then wait on the same handle.
 
 Give each child one bounded task with an explicit expected result. Never ask a child to create subagents or delegate again.
+
+## When `sub` itself misbehaves
+
+Capture the task handle and run `sub report <handle>`. Give the resulting command to the user for review; the manager never files the issue itself.
 ";
 
 #[derive(Debug, Clone)]

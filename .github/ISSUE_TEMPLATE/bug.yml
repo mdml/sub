@@ -1,0 +1,93 @@
+name: Bug report
+description: Report incorrect behavior in sub or one of its harness integrations.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reviewing the report for sensitive information before submitting it. `sub report <handle>` can draft the metadata without submitting anything.
+  - type: input
+    id: sub_version
+    attributes:
+      label: sub version or tag
+      description: Paste the complete output of `sub --version`, and include the release tag when known.
+      placeholder: sub 0.1.0 or v0.1.0-nightly.20260902.123.1
+    validations:
+      required: true
+  - type: dropdown
+    id: manager_harness
+    attributes:
+      label: Manager harness
+      options:
+        - Claude Code
+        - Codex CLI
+        - Cursor Agent
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: manager_version
+    attributes:
+      label: Manager harness version
+      placeholder: Complete version output
+    validations:
+      required: true
+  - type: dropdown
+    id: child_harness
+    attributes:
+      label: Child harness
+      options:
+        - Claude Code
+        - Codex CLI
+        - Cursor Agent
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: child_version
+    attributes:
+      label: Child harness version
+      placeholder: Complete version output
+    validations:
+      required: true
+  - type: textarea
+    id: delegated_work
+    attributes:
+      label: What was delegated?
+      description: Describe the bounded task. Include only prompt content needed to reproduce the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: task_handle
+    attributes:
+      label: Task handle
+      description: Paste the `tsk_...` handle used with `sub inspect`.
+      placeholder: tsk_0123456789abcdef01234567
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Scrubbed sub inspect output
+      description: Run `sub inspect <handle>`. Before pasting, scrub home paths, prompt content, hostnames, and any other user or project content. Do not attach native transcripts or credentials.
+      render: json
+    validations:
+      required: true
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Scrub confirmation
+      options:
+        - label: I reviewed the report and redacted home paths, prompt content, hostnames, credentials, and other user content.
+          required: true

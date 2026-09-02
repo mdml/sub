@@ -1,0 +1,293 @@
+name: promote to stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_nightly_tag:
+        description: Nightly tag used as the stable base
+        required: true
+        type: string
+      cherry_picks:
+        description: Optional ordered main commit SHAs; blank discovers stable-candidate PR commits
+        required: false
+        type: string
+      version_override:
+        description: Optional exact 0.x.y version; blank derives the bump from Conventional Commits
+        required: false
+        type: string
+      allow_untagged_base:
+        description: Deliberately allow a main ref that is not a nightly tag
+        required: true
+        default: false
+        type: boolean
+      confirm:
+        description: Apply the plan shown by a preview run
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: promote-stable
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      base_sha: ${{ steps.plan.outputs.base_sha }}
+      commits: ${{ steps.plan.outputs.commits }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE_REF: ${{ inputs.base_nightly_tag }}
+      REQUESTED_COMMITS: ${{ inputs.cherry_picks }}
+      ALLOW_UNTAGGED: ${{ inputs.allow_untagged_base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+      - id: plan
+        name: Resolve base and ordered commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main staging --tags
+          base_sha=$(git rev-parse --verify "$BASE_REF^{commit}")
+          git merge-base --is-ancestor "$base_sha" origin/main || {
+            echo "stable base is not in main history: $BASE_REF" >&2
+            exit 1
+          }
+          if [[ "$ALLOW_UNTAGGED" != "true" ]]; then
+            [[ "$BASE_REF" == v*-nightly.* ]] || {
+              echo "stable base must be a nightly tag; set allow_untagged_base deliberately to override" >&2
+              exit 1
+            }
+            git tag --points-at "$base_sha" | grep -Fx "$BASE_REF" >/dev/null || {
+              echo "stable base does not resolve to the named nightly tag: $BASE_REF" >&2
+              exit 1
+            }
+          fi
+
+          mapfile -t main_commits < <(git rev-list --reverse "$base_sha..origin/main")
+          commits=()
+          if [[ -n "${REQUESTED_COMMITS//[[:space:],]/}" ]]; then
+            while IFS= read -r requested; do
+              [[ -n "$requested" ]] || continue
+              sha=$(git rev-parse --verify "$requested^{commit}")
+              printf '%s\n' "${main_commits[@]}" | grep -Fx "$sha" >/dev/null || {
+                echo "cherry-pick is not a main commit after the base: $requested" >&2
+                exit 1
+              }
+              commits+=("$sha")
+            done < <(printf '%s\n' "$REQUESTED_COMMITS" | tr ',' '\n' | xargs -n1 printf '%s\n')
+            source=explicit
+          else
+            gh pr list -R "$GITHUB_REPOSITORY" --state merged --label stable-candidate --limit 100 \
+              --json number,title,mergedAt,commits > "$RUNNER_TEMP/candidates.json"
+            for sha in "${main_commits[@]}"; do
+              if jq -e --arg sha "$sha" 'any(.[]; any(.commits[]?; .oid == $sha))' "$RUNNER_TEMP/candidates.json" >/dev/null; then
+                commits+=("$sha")
+              fi
+            done
+            source=stable-candidate
+          fi
+
+          {
+            echo "base_sha=$base_sha"
+            echo "commits=${commits[*]}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Stable promotion preview"
+            echo
+            echo "Base: \`$BASE_REF\` at \`$base_sha\`"
+            echo
+            echo "Commit source: \`$source\`"
+            echo
+            if [[ "$ALLOW_UNTAGGED" == "true" ]]; then
+              echo "> Nightly-base enforcement was deliberately overridden."
+              echo
+            fi
+            if ((${#commits[@]} == 0)); then
+              echo "No commits will be cherry-picked."
+            else
+              echo "| Order | Commit | Subject |"
+              echo "|:--|:--|:--|"
+              order=0
+              for sha in "${commits[@]}"; do
+                order=$((order + 1))
+                subject=$(git show -s --format=%s "$sha" | tr '|' '/')
+                echo "| $order | \`$sha\` | $subject |"
+              done
+            fi
+            echo
+            if [[ "${{ inputs.confirm }}" == "true" ]]; then
+              echo "Confirmed: the promotion job will apply this plan."
+            else
+              echo "Preview only. Re-run with **confirm** checked to apply this plan."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    needs: plan
+    if: inputs.confirm
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: write
+    env:
+      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      BASE_SHA: ${{ needs.plan.outputs.base_sha }}
+      COMMITS: ${{ needs.plan.outputs.commits }}
+      VERSION_OVERRIDE: ${{ inputs.version_override }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy, llvm-tools
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
+        with:
+          tool: cargo-llvm-cov@0.8.7,cargo-deny@0.20.2
+      - name: Assemble stable and prepare the release
+        id: assemble
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(git remote get-url --push origin)" in
+            git@github.com:* | ssh://git@github.com/*) ;;
+            *) echo "release ref writes require the SSH deploy key" >&2; exit 1 ;;
+          esac
+          git fetch origin main staging --tags
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -C stable "$BASE_SHA"
+          for sha in $COMMITS; do
+            if ! git cherry-pick "$sha"; then
+              {
+                echo "## Stable promotion stopped"
+                echo
+                echo "Cherry-pick \`$sha\` conflicted. No conflict was resolved and no remote ref was changed."
+                echo
+                echo '```'
+                git status --short
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
+
+          last_stable=$(git tag --list 'v*' | grep -E '^v0\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+          if [[ -n "$last_stable" ]]; then
+            current=${last_stable#v}
+            range="$last_stable..HEAD"
+          else
+            current=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+            range="HEAD"
+          fi
+          if [[ -n "$VERSION_OVERRIDE" ]]; then
+            [[ "$VERSION_OVERRIDE" =~ ^0\.[0-9]+\.[0-9]+$ ]] || {
+              echo "version_override must be an exact 0.x.y version" >&2
+              exit 1
+            }
+            version=$VERSION_OVERRIDE
+            bump="override"
+          else
+            messages=$(git log "$range" --format='%s%n%b')
+            if grep -Eq '(^|[[:space:]])BREAKING[ -]CHANGE:|^[a-z]+(\([^)]*\))?!:' <<< "$messages" || grep -Eq '^feat(\([^)]*\))?:' <<< "$messages"; then
+              bump="minor"
+            else
+              bump="patch"
+            fi
+            IFS=. read -r major minor patch <<< "$current"
+            if [[ "$bump" == minor ]]; then
+              version="$major.$((minor + 1)).0"
+            else
+              version="$major.$minor.$((patch + 1))"
+            fi
+          fi
+          [[ "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -n 1)" == "$version" && "$version" != "$current" ]] || {
+            echo "stable version must advance beyond $current: $version" >&2
+            exit 1
+          }
+          tag="v$version"
+          git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null && {
+            echo "stable tag already exists: $tag" >&2
+            exit 1
+          }
+          scripts/release/prepare-stable.sh "$version" "$(date -u +%Y-%m-%d)"
+          git add Cargo.toml Cargo.lock CHANGELOG.md
+          scripts/verify.sh --full --all
+          git commit -m "chore(release): prepare $tag"
+          release_commit=$(git rev-parse HEAD)
+          git branch stable-assembled "$release_commit"
+
+          sync_branch="chore/stable-release-$tag"
+          git switch -C "$sync_branch" origin/staging
+          if ! git cherry-pick "$release_commit"; then
+            {
+              echo "## Stable promotion stopped"
+              echo
+              echo "The release-prep commit conflicted with \`staging\`. No conflict was resolved and no remote ref was changed."
+              echo
+              echo '```'
+              git status --short
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          sync_commit=$(git rev-parse HEAD)
+          git switch stable-assembled
+          git branch -f stable "$release_commit"
+          git tag -a "$tag" "$release_commit" -m "Stable $tag"
+
+          remote_stable=$(git ls-remote origin refs/heads/stable | cut -f1)
+          remote_sync=$(git ls-remote origin "refs/heads/$sync_branch" | cut -f1)
+          git push --atomic \
+            --force-with-lease="refs/heads/stable:$remote_stable" \
+            --force-with-lease="refs/heads/$sync_branch:$remote_sync" \
+            origin \
+            "refs/heads/stable:refs/heads/stable" \
+            "refs/tags/$tag:refs/tags/$tag" \
+            "$sync_commit:refs/heads/$sync_branch"
+
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head "$sync_branch" --state open --json url --jq '.[0].url')
+          if [[ -z "$pr" ]]; then
+            pr=$(gh pr create --repo "$GITHUB_REPOSITORY" --base staging --head "$sync_branch" \
+              --title "chore(release): reconcile $tag to staging" \
+              --body "Automated reconciliation of the version and changelog cut from stable release $tag. Rebase-merge this small PR into staging.")
+          fi
+          gh workflow run per-commit.yml --repo "$GITHUB_REPOSITORY" --ref "$sync_branch" -f base=staging
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref stable -f tag="$tag"
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "bump=$bump"
+            echo "pr=$pr"
+          } >> "$GITHUB_OUTPUT"
+      - name: Summarize promotion
+        env:
+          TAG: ${{ steps.assemble.outputs.tag }}
+          VERSION: ${{ steps.assemble.outputs.version }}
+          BUMP: ${{ steps.assemble.outputs.bump }}
+          PR: ${{ steps.assemble.outputs.pr }}
+        run: |
+          {
+            echo "## Stable promotion"
+            echo
+            echo "Published refs for \`$TAG\` (version \`$VERSION\`, bump source \`$BUMP\`)."
+            echo
+            echo "Dispatched the generated release workflow and the reconciliation PR gate."
+            echo
+            echo "Reconciliation PR: $PR"
+          } >> "$GITHUB_STEP_SUMMARY"
