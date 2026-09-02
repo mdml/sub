@@ -125,15 +125,13 @@ async fn execute_prompt(
     let observer = update_observer(paths, handle, running.clone());
     let session_observer = session_observer(paths, handle, running, is_resume);
     let prompt = prompt_text(&request, is_resume);
-    let options = prompt_options(&request, paths);
+    let options = PromptOptions {
+        update_observer: Some(observer),
+        session_observer: Some(session_observer),
+        ..prompt_options(&request, paths)
+    };
     AcpClient::new(request.adapter.bridge, AcpClientConfig::default())
-        .prompt_turn_observing_session(
-            &request.params.cwd,
-            &prompt,
-            options,
-            Some(observer),
-            Some(session_observer),
-        )
+        .prompt_turn(&request.params.cwd, &prompt, options)
         .await
 }
 

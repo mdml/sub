@@ -1,5 +1,6 @@
 //! ACP v1 client over stdio.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,9 +24,6 @@ use super::session::{PromptResult, SessionHandle, SessionStart};
 use super::stop_reason::StopReason;
 use super::update::StreamUpdate;
 
-#[macro_use]
-mod client_api;
-
 #[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcRequest)]
 #[request(method = "cursor/ask_question", response = CursorExtensionResponse)]
 struct CursorAskQuestionRequest(serde_json::Value);
@@ -42,7 +40,7 @@ struct CursorExtensionResponse(serde_json::Value);
 struct CursorTaskNotification(serde_json::Value);
 
 /// Options for one prompt turn.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct PromptOptions {
     /// Fail with [`AcpError::TimedOut`] when the turn exceeds this duration.
     pub timeout: Option<Duration>,
@@ -58,6 +56,27 @@ pub struct PromptOptions {
     pub session_meta: Option<serde_json::Value>,
     /// Create, resume, or replay-load the harness session.
     pub session_start: SessionStart,
+    /// Callback notified for each normalized stream update.
+    pub update_observer: Option<UpdateObserver>,
+    /// Callback notified as soon as the harness session is open.
+    pub session_observer: Option<SessionObserver>,
+}
+
+impl fmt::Debug for PromptOptions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PromptOptions")
+            .field("timeout", &self.timeout)
+            .field("cancel_after", &self.cancel_after)
+            .field("cancellation", &self.cancellation)
+            .field("permission_mode", &self.permission_mode)
+            .field("model", &self.model)
+            .field("session_meta", &self.session_meta)
+            .field("session_start", &self.session_start)
+            .field("update_observer", &self.update_observer.is_some())
+            .field("session_observer", &self.session_observer.is_some())
+            .finish()
+    }
 }
 
 /// Supervisor-owned cancellation signal for one prompt turn.
@@ -100,10 +119,22 @@ impl AcpClient {
         prompt: &str,
         options: PromptOptions,
     ) -> Result<(SessionHandle, PromptResult), AcpError> {
-        self.prompt_turn_observing(cwd, prompt, options, None).await
+        let timeout = options.timeout;
+        let run = run_prompt_turn(
+            self,
+            PromptTurn {
+                cwd: cwd.as_ref().to_path_buf(),
+                prompt: prompt.to_owned(),
+                options,
+            },
+        );
+        match timeout {
+            Some(duration) => tokio::time::timeout(duration, run)
+                .await
+                .map_err(|_| AcpError::TimedOut(duration))?,
+            None => run.await,
+        }
     }
-
-    observing_methods!();
 }
 
 macro_rules! request_handler {
@@ -124,8 +155,6 @@ struct PromptTurn {
     cwd: PathBuf,
     prompt: String,
     options: PromptOptions,
-    observer: Option<UpdateObserver>,
-    session_observer: Option<SessionObserver>,
 }
 
 #[derive(Clone)]
@@ -228,7 +257,7 @@ async fn run_prompt_turn(
     )));
     let sink = StreamSink {
         updates: update_tx,
-        observer: turn.observer.clone(),
+        observer: turn.options.update_observer.clone(),
         loading_replay: Arc::clone(&loading_replay),
     };
     let context = ConnectionContext {
@@ -280,7 +309,7 @@ async fn drive_connection(
     let handle = SessionHandle {
         session_id: session_id.to_string(),
     };
-    if let Some(observer) = &context.turn.session_observer {
+    if let Some(observer) = &context.turn.options.session_observer {
         observer(&handle.session_id);
     }
     configure_session(&connection, &session_id, &context.turn.options).await?;
