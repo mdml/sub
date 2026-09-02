@@ -6,11 +6,12 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let config = root.path().join("sub.toml");
     let state = root.path().join("state");
+    let binary = env!("CARGO_BIN_EXE_sub");
     std::fs::write(
         &config,
         format!(
-            "state_dir = '{}'\n[harnesses.claude]\nbinary = '/bin/true'\npermission_mode = 'bypassPermissions'\n[harnesses.codex]\nbinary = '/bin/true'\npermission_mode = 'agent'\n[harnesses.cursor]\nbinary = '/bin/true'\npermission_mode = 'agent'\n",
-            state.display()
+            "state_dir = '{}'\n[harnesses.claude]\nbinary = '{binary}'\npermission_mode = 'bypassPermissions'\n[harnesses.codex]\nbinary = '{binary}'\npermission_mode = 'agent'\n[harnesses.cursor]\nbinary = '{binary}'\npermission_mode = 'agent'\n",
+            state.display(),
         ),
     )
     .unwrap_or_else(|error| panic!("config: {error}"));
@@ -20,7 +21,6 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
     let codex_skills = root.path().join("codex/skills");
     let cursor_config = root.path().join("cursor/mcp.json");
     let cursor_skills = root.path().join("cursor/skills");
-    let binary = env!("CARGO_BIN_EXE_sub");
     let path = fake_npm(root.path());
     let run = |harnesses: &[&str]| {
         Command::new(binary)
@@ -33,7 +33,7 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
             .env("SUB_CODEX_SKILLS_DIR", &codex_skills)
             .env("SUB_CURSOR_CONFIG", &cursor_config)
             .env("SUB_CURSOR_SKILLS_DIR", &cursor_skills)
-            .env("SUB_MCP_BINARY", "/bin/true")
+            .env("SUB_MCP_BINARY", binary)
             .env("PATH", &path)
             .output()
             .unwrap_or_else(|error| panic!("onboard: {error}"))
@@ -66,7 +66,7 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
         &std::fs::read(&cursor_config).unwrap_or_else(|error| panic!("cursor config: {error}")),
     )
     .unwrap_or_else(|error| panic!("cursor json: {error}"));
-    assert_eq!(cursor["mcpServers"]["sub"]["command"], "/bin/true");
+    assert_eq!(cursor["mcpServers"]["sub"]["command"], binary);
     assert!(
         std::fs::read_to_string(codex_config)
             .unwrap_or_else(|error| panic!("codex config: {error}"))

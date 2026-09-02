@@ -2,6 +2,10 @@
 
 use std::process::Command;
 
+fn existing_binary() -> std::path::PathBuf {
+    std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"))
+}
+
 #[cfg(unix)]
 fn fake_npm(root: &std::path::Path) -> String {
     use std::fs;
