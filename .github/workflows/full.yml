@@ -1,10 +1,8 @@
-# Full gate: pull requests into main and pushes to main.
+# Full gate: pull requests into main.
 name: full
 
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
 
 permissions:
@@ -32,4 +30,6 @@ jobs:
       - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-llvm-cov@0.8.7,cargo-deny@0.20.2
-      - run: scripts/verify.sh --full
+      - env:
+          SUB_VERIFY_BASE: origin/${{ github.base_ref }}
+        run: scripts/verify.sh --full

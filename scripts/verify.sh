@@ -1,22 +1,26 @@
 #!/usr/bin/env sh
 # The single verification entry point for this repository.
 #
-#   scripts/verify.sh          per-commit gate (format, lint, build, tests, coverage)
-#   scripts/verify.sh --full   full gate: per-commit gate + CodeScene + dependency audit
-#
-# `just verify` and `just verify-full` call this script; CI calls it directly.
-# The gates are defined by the mental model (see AGENTS.md); this script
-# implements them. See docs/verification.md for what each step does.
+#   scripts/verify.sh                  fast gate, including staged-file CodeScene
+#   scripts/verify.sh --full           PR gate, including base-relative CodeScene and cargo-deny
+#   scripts/verify.sh --full --base R  PR gate relative to base ref R
 set -eu
 
 COVERAGE_MIN="${SUB_COVERAGE_MIN:-90}"
+BASE_REF="${SUB_VERIFY_BASE:-origin/staging}"
 FULL=0
-for arg in "$@"; do
-    case "$arg" in
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --full) FULL=1 ;;
-        -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
-        *) echo "verify: unknown argument '$arg'" >&2; exit 2 ;;
+        --base)
+            [ "$#" -ge 2 ] || { echo "verify: --base requires a ref" >&2; exit 2; }
+            BASE_REF="$2"
+            shift
+            ;;
+        -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+        *) echo "verify: unknown argument '$1'" >&2; exit 2 ;;
     esac
+    shift
 done
 
 cd "$(dirname "$0")/.."
@@ -54,8 +58,14 @@ if [ "$FULL" -eq 1 ]; then
     need cargo-deny
     cargo deny --locked check
 
-    step "CodeScene (code health 10 for eligible files)"
-    scripts/codescene.sh
+    step "CodeScene (files changed from $BASE_REF, code health 10)"
+    scripts/codescene.sh --base "$BASE_REF"
+elif [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    step "CodeScene (files changed by HEAD, code health 10)"
+    scripts/codescene.sh --commit HEAD
+else
+    step "CodeScene (staged files, code health 10)"
+    scripts/codescene.sh --staged
 fi
 
 step "verify: OK"

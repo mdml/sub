@@ -28,9 +28,12 @@ done
 
 log ""
 log "harness-compatibility: adapter declared versions"
-log "  sub-adapter-claude: bridge @agentclientprotocol/claude-agent-acp@0.70.0; claude 2.1.246, 2.1.251"
-log "  sub-adapter-codex: bridge @agentclientprotocol/codex-acp@1.6.2; codex 0.149.1, 0.151.0"
-log "  sub-adapter-cursor: native ACP v1; cursor-agent 2026.08.25-3e8eec8"
+for adapter in claude codex cursor; do
+    log "  sub-adapter-$adapter:"
+    sed -n '/pub const \(BRIDGE_PACKAGE\|BRIDGE_VERSION\|VERIFIED_HARNESS_VERSIONS\)/p' "crates/sub-adapter-$adapter/src/lib.rs" |
+        sed 's/^/    /' |
+        tee -a "$REPORT"
+done
 log "  version mismatches are reported only"
 
 log ""

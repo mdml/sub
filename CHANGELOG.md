@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Require the full verification gate on every pull request and the fast gate on every branch commit, with CodeScene score 10 enforced for the appropriate changed-file set and mandatory credentials in both CI workflows.
+- Refactor the delegation kernel, ACP client, CLI, MCP, fake harness, and contract tests into focused modules while preserving public and serialized shapes; the whole tracked Rust tree now establishes a CodeScene health-10 baseline for all scorable files.
+- Align harness-nightly and release-trigger documentation with the implemented scripts and workflows.
+
 ### Added
 
 - Real `sub-adapter-cursor` support under the canonical `cursor` harness name: native `cursor-agent acp` launch with no bridge, native permission modes, prompt-level subagent guard plus Cursor task observation, false/false usage support, `session/load` recovery without replay double counting, onboarding, a stamped real-stream fixture and contract run, and a non-gating Cursor beta-path variant.
