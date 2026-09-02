@@ -28,3 +28,4 @@ One file per repository-level decision, named `YYYY-MM-DD-<slug>.md`. Each state
 | 2026-09-01 | [Onboarding installation for Claude and Codex](2026-09-01-onboarding-installation.md) |
 | 2026-09-01 | [Cursor native ACP transport and extension handling](2026-09-01-cursor-native-acp-and-extensions.md) |
 | 2026-09-01 | [Load-replay observation boundary](2026-09-01-load-replay-observation-boundary.md) |
+| 2026-09-02 | [CodeScene-scoped commit and pull-request verification gates](2026-09-02-verification-gates.md) |

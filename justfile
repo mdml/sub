@@ -1,10 +1,10 @@
 # Task runner entry points. `just` is pinned in mise.toml.
 
-# Per-commit gate: format, lint, build, docs, tests with coverage.
+# Fast per-commit gate: compiler/test/coverage checks plus staged-file CodeScene.
 verify:
     scripts/verify.sh
 
-# Full gate: per-commit gate plus dependency audit and CodeScene.
+# Full PR gate: compiler/test/coverage checks, dependency audit, and base-relative CodeScene.
 verify-full:
     scripts/verify.sh --full
 

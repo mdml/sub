@@ -1,60 +1,56 @@
 # Verification
 
-One entry point, `scripts/verify.sh`, is run by `claude`, `codex`, `cursor-agent`, the owner, and CI. `just verify` and `just verify-full` are aliases. Rationale: [`decisions/2026-08-27-verification-entry-point.md`](decisions/2026-08-27-verification-entry-point.md).
+`scripts/verify.sh` is the single verification entry point used by `claude`, `codex`, `cursor-agent`, maintainers, and CI. `just verify` and `just verify-full` are aliases. The current gate design is recorded in [`decisions/2026-09-02-verification-gates.md`](decisions/2026-09-02-verification-gates.md); the 2026-08-27 verification records remain historical.
 
 ## Setup
 
-- Rust toolchain: `rustup` reads `rust-toolchain.toml` (1.97.1 with `rustfmt`, `clippy`, `llvm-tools`).
-- Tools: `mise install` provisions `just`, `cargo-llvm-cov`, and `cargo-deny` at the versions in `mise.toml`. Without `mise`, install the same versions with `cargo install`.
-- Full gate only: `scripts/codescene.sh` additionally needs `python3` and, when the CodeScene CLI is not on `PATH`, `curl`.
+- Rust toolchain: `rustup` reads `rust-toolchain.toml` (1.97.1 with `rustfmt`, `clippy`, and `llvm-tools`).
+- Tools: `mise install` provisions `just`, `cargo-llvm-cov`, and `cargo-deny` at the versions in `mise.toml`. Without `mise`, install those versions directly.
+- CodeScene: every gate requires `CS_ACCESS_TOKEN`. `scripts/codescene.sh` uses `cs` from `PATH` or installs the official CLI under `target/codescene`; installation additionally requires `curl`. A missing token is always a hard failure, including when no changed Rust files are eligible.
 
-## The per-commit gate: `scripts/verify.sh`
+## Fast per-commit gate: `scripts/verify.sh`
 
-Runs on every push to a pull-request branch and on pull requests into `staging`. Run it before every commit.
+Run the fast gate before every commit after staging the intended changes. Locally it checks staged Rust files with `scripts/codescene.sh --staged`. On a push-triggered GitHub Actions run it checks Rust files changed by `HEAD` with `scripts/codescene.sh --commit HEAD`.
 
 | Step | Command | Fails when |
 |:--|:--|:--|
 | Format | `cargo fmt --all -- --check` | Any file differs from `rustfmt` output. |
-| Lint | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | Any warning. Lint levels are set in the root `Cargo.toml` (`clippy::all`, `clippy::pedantic`, `unwrap_used`, `expect_used`; `unsafe_code` forbidden; `missing_docs` warned). |
-| Typecheck and build | `cargo build --workspace --all-targets --all-features --locked` | Compile error, or `Cargo.lock` out of date. |
-| Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked` | Broken intra-doc link or rustdoc warning. |
-| Tests and coverage | `cargo llvm-cov --workspace --all-features --locked --fail-under-lines 90 --summary-only` | Any test fails, or line coverage over the workspace is below 90 %. |
+| Lint | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | Any warning. Workspace lint policy is defined in the root `Cargo.toml`. |
+| Typecheck and build | `cargo build --workspace --all-targets --all-features --locked` | Compilation fails or `Cargo.lock` is stale. |
+| Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked` | Rustdoc emits a warning. |
+| Tests and coverage | `cargo llvm-cov --workspace --all-features --locked --fail-under-lines 90 --summary-only` | A test fails or workspace line coverage is below 90%. |
+| Changed-file code health | `scripts/codescene.sh --staged` locally; `scripts/codescene.sh --commit HEAD` on push CI | `CS_ACCESS_TOKEN` is missing, CodeScene fails, or any changed scorable Rust file has a score below 10. |
 
-The per-commit gate includes the behavioral contract suite (`crates/sub-sdk/tests/behavioral_contract.rs`) against the `sub-harness-fake` binary, plus kernel and surface tests for durable launch/wait and bridge integrity. Opt-in real-harness runs use `SUB_CONTRACT_REAL_HARNESS` and the bridge path printed by `sub bridge install`; see [`nightlies/harness-compatibility.md`](nightlies/harness-compatibility.md).
+The test step includes the behavioral contract suite against `sub-harness-fake`. Real-harness mode remains opt-in and is used only by the on-machine harness-compatibility nightly; verification gates do not run real harnesses.
 
-On 2026-08-31, real contract mode passed with Claude Code 2.1.251 through `@agentclientprotocol/claude-agent-acp` 0.70.0 and Codex CLI 0.151.0 through `@agentclientprotocol/codex-acp` 1.6.2. Both bridges were installed first by `sub` into a throwaway state directory. The contract entrypoint found no fake/real divergence, and separate full supervisor launch/wait runs succeeded through both adapters. The subsequent Delegate proof found that a Codex execute tool can create a file without an ACP edit location; result derivation and its tests now also recognize existing working-directory files linked from the streamed final Markdown.
+## Full PR gate: `scripts/verify.sh --full`
 
-On 2026-09-01, real contract mode additionally exercised ACP cancellation after launch and cross-process resume. Claude Code 2.1.252 and Codex CLI 0.151.0 both returned the `cancelled` stop reason through their pinned bridges, with no fake/real divergence. The kernel suite separately covers supervisor-mediated honored and ignored cancellation plus already-finished and orphaned delivery dispositions.
-
-The coverage threshold is the same as the full gate's, so a change that passes here already meets `main`'s coverage requirement. Set `SUB_COVERAGE_MIN` to experiment locally; CI does not.
-
-## The full gate: `scripts/verify.sh --full`
-
-Runs on pull requests into `main` and on pushes to `main`. It is the per-commit gate plus:
+Every pull request into `staging` or `main` runs the full gate. It runs the format, lint, build, docs, tests, and coverage steps from the fast gate, then adds:
 
 | Step | Command | Fails when |
 |:--|:--|:--|
-| Dependency audit | `cargo deny --locked check` | A RustSec advisory, a license outside `deny.toml`'s allow-list, a wildcard version, or a non-crates.io source. |
-| CodeScene | `scripts/codescene.sh` | `CS_ACCESS_TOKEN` is unset (exit 3, message names the secret), or any tracked `.rs` file scores below code health 10. |
+| Dependency policy | `cargo deny --locked check` | An advisory, disallowed license, wildcard dependency, banned dependency, or disallowed source is found. |
+| PR-relative code health | `scripts/codescene.sh --base BASE` | `CS_ACCESS_TOKEN` is missing, CodeScene fails, or any scorable Rust file changed relative to the PR base has a score below 10. |
 
-The CodeScene step has not yet been run with a real token. The CodeScene CLI documents no threshold flag, so the script reads `cs review --output-format json` and expects a `score` field; if the field is named differently the script fails and prints the output so the name can be corrected.
+The base ref defaults to `origin/staging`. Override it with `scripts/verify.sh --full --base REF` or `SUB_VERIFY_BASE=REF scripts/verify.sh --full`. CI supplies `origin/${{ github.base_ref }}` and checks out full history.
+
+`scripts/codescene.sh` also retains whole-tree mode as `scripts/codescene.sh` or `scripts/codescene.sh --all`. CodeScene documents JSON `score: null` as “no scorable code”; those files are reported as ineligible rather than passed as score 10.
 
 ## CI
 
-| Workflow | Trigger | Runs |
+| Workflow and required context | Trigger | Gate |
 |:--|:--|:--|
-| `per-commit.yml` | push to any branch except `main`/`staging`; PR into `staging` | `scripts/verify.sh` |
-| `full.yml` | PR into `main`; push to `main` | `scripts/verify.sh --full` with the `CS_ACCESS_TOKEN` secret |
-| `nightly.yml` | daily 06:17 UTC; manual | `cargo deny check advisories`; `cargo update --dry-run` freshness report |
-| `release.yml` | `v*` tags | generated by `cargo-dist`; see [`release.md`](release.md) |
+| `per-commit.yml` / `verify` | Push to any branch except `main` and `staging` | Fast gate against the pushed commit. |
+| `per-commit.yml` / `verify` | Pull request into `staging` | Full gate relative to `staging`. |
+| `full.yml` / `verify-full` | Pull request into `main` | Full gate relative to `main`. |
+| `nightly.yml` | Daily at 06:17 UTC; manual | Advisory check and dependency-freshness report. |
+| `release.yml` | Pull requests for release planning; cargo-dist semantic-version tag pushes for publishing | Generated release plan/build or publication; see [`release.md`](release.md). |
 
-Dependabot (`.github/dependabot.yml`) proposes Cargo and GitHub Actions updates weekly into `staging`.
-
-The on-machine nightlies are not CI; see [`nightlies/`](nightlies/README.md).
+The `verify` and `verify-full` job names are the required-check contexts used by the protected-branch rulesets. Dependabot proposes Cargo and GitHub Actions updates weekly into `staging`. On-machine nightlies are documented under [`nightlies/`](nightlies/README.md).
 
 ## Secrets
 
 | Secret | Used by | Purpose |
 |:--|:--|:--|
-| `CS_ACCESS_TOKEN` | `full.yml` | CodeScene access token for the code-health step. |
-| `HOMEBREW_TAP_TOKEN` | `release.yml` | Push access to the Homebrew tap repository (first release only). |
+| `CS_ACCESS_TOKEN` | `per-commit.yml`, `full.yml` | Mandatory CodeScene authentication for push and PR gates. |
+| `HOMEBREW_TAP_TOKEN` | `release.yml` | Push access to the Homebrew tap repository for releases. |
