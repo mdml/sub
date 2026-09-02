@@ -6,6 +6,7 @@ use crate::acp::{StopReason, StreamUpdate, StreamUpdateKind};
 
 use super::liveness::process_start_time;
 use super::result::{derive_changed_files, markdown_destinations};
+use super::supervisor::supervisor_command;
 use super::*;
 
 fn fake_binary() -> PathBuf {

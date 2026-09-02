@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use super::config::AcpClientConfig;
 use super::error::AcpError;
 use super::launch::HarnessLaunch;
+use super::process::AgentProcess;
 use super::session::{PromptResult, SessionHandle, SessionStart};
 use super::stop_reason::StopReason;
 use super::update::StreamUpdate;
@@ -241,6 +242,7 @@ struct ConnectionContext {
     result: tokio::sync::oneshot::Sender<(SessionHandle, PromptResult)>,
     updates: tokio::sync::mpsc::UnboundedReceiver<StreamUpdate>,
     loading_replay: Arc<AtomicBool>,
+    force_termination: Arc<AtomicBool>,
 }
 
 async fn run_prompt_turn(
@@ -249,12 +251,14 @@ async fn run_prompt_turn(
 ) -> Result<(SessionHandle, PromptResult), AcpError> {
     let client_name = client.config.client_name.clone();
     let agent = AcpAgent::new(client.launch.clone().into_acp_config());
+    let (mut process, transport) = AgentProcess::spawn(&agent)?;
     let (result_tx, result_rx) = tokio::sync::oneshot::channel();
     let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel();
     let loading_replay = Arc::new(AtomicBool::new(matches!(
         &turn.options.session_start,
         SessionStart::Load(_)
     )));
+    let force_termination = Arc::new(AtomicBool::new(false));
     let sink = StreamSink {
         updates: update_tx,
         observer: turn.options.update_observer.clone(),
@@ -265,8 +269,9 @@ async fn run_prompt_turn(
         result: result_tx,
         updates: update_rx,
         loading_replay,
+        force_termination: Arc::clone(&force_termination),
     };
-    Client
+    let protocol_result = Client
         .builder()
         .name(&client_name)
         .on_receive_request(
@@ -289,11 +294,15 @@ async fn run_prompt_turn(
             notification_handler!(sink, cursor_task),
             agent_client_protocol::on_receive_notification!(),
         )
-        .connect_with(agent, async move |connection| {
+        .connect_with(transport, async move |connection| {
             drive_connection(connection, context).await
         })
-        .await
-        .map_err(|error| AcpError::protocol(&error))?;
+        .await;
+    let process_result = process
+        .shutdown(force_termination.load(Ordering::Acquire))
+        .await;
+    protocol_result.map_err(|error| AcpError::protocol(&error))?;
+    process_result?;
     result_rx.await.map_err(|_| AcpError::StreamEnded)
 }
 
@@ -316,6 +325,9 @@ async fn drive_connection(
     schedule_cancel(&connection, &session_id, context.turn.options.cancel_after);
     let (response, cancellation_honored) =
         prompt_agent(&connection, &session_id, &context.turn).await?;
+    if response.is_none() && cancellation_honored == Some(false) {
+        context.force_termination.store(true, Ordering::Release);
+    }
     let result = collect_result(handle, response, cancellation_honored, &mut context.updates);
     context
         .result

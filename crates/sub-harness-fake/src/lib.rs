@@ -43,6 +43,9 @@ pub fn fixtures_dir() -> PathBuf {
 pub async fn run_from_env() -> Result<(), Box<dyn std::error::Error>> {
     let scenario = scenario_name()?;
     let (scenarios_root, fixtures_root) = resolve_roots();
+    if let Some(pid_file) = env::var_os("SUB_FAKE_PID_FILE") {
+        std::fs::write(pid_file, std::process::id().to_string())?;
+    }
 
     run_stdio(&scenarios_root, &fixtures_root, &scenario).await?;
     Ok(())

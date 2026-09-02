@@ -42,11 +42,12 @@ The base ref defaults to `origin/staging`. Override it with `scripts/verify.sh -
 |:--|:--|:--|
 | `per-commit.yml` / `verify` | Push to any branch except `main` and `staging` | Fast gate against the pushed commit. |
 | `per-commit.yml` / `verify` | Pull request into `staging` | Full gate relative to `staging`. |
+| `per-commit.yml` / `macOS test suite (fake harness)` | Push to any branch except `main` and `staging`; pull request into `staging` | Workspace test suite on `macos-latest`, including the fake-harness contract; no real harnesses or CodeScene. |
 | `full.yml` / `verify-full` | Pull request into `main` | Full gate relative to `main`. |
 | `nightly.yml` | Daily at 06:17 UTC; manual | Advisory check and dependency-freshness report. |
 | `release.yml` | Pull requests for release planning; cargo-dist semantic-version tag pushes for publishing | Generated release plan/build or publication; see [`release.md`](release.md). |
 
-The `verify` and `verify-full` job names are the required-check contexts used by the protected-branch rulesets. Dependabot proposes Cargo and GitHub Actions updates weekly into `staging`. On-machine nightlies are documented under [`nightlies/`](nightlies/README.md).
+The `verify` and `verify-full` job names are the required-check contexts used by the protected-branch rulesets. `macOS test suite (fake harness)` is a required-check candidate for the `staging` ruleset. Dependabot proposes Cargo and GitHub Actions updates weekly into `staging`. On-machine nightlies are documented under [`nightlies/`](nightlies/README.md).
 
 ## Secrets
 

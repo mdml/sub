@@ -9,6 +9,7 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod launch;
+mod process;
 pub mod session;
 pub mod stop_reason;
 pub mod update;

@@ -1,6 +1,6 @@
 # Supervisor liveness and orphaned attempt status
 
-Date: 2026-09-01. Status: adopted.
+Date: 2026-09-01. Status: superseded in part on 2026-09-02 by [Portable Unix supervisor detachment and identity](2026-09-02-portable-unix-supervision.md); the `orphaned` status semantics remain adopted.
 
 ## Decision
 
