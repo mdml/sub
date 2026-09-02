@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn launch_validates_paths_and_persists_handle() {
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
-    let delegator = Delegator::new(root.path(), "/bin/true");
+    let delegator = Delegator::new(root.path(), fake_binary());
     let mut request = fake_request(root.path(), "replay-minimal");
     request.params.cwd = PathBuf::from("relative");
     assert!(
