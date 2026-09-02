@@ -378,6 +378,8 @@ mod tests {
             cursor_config: root.path().join("cursor.json"),
             cursor_skills: root.path().join("cursor-skills"),
         };
+        let existing_binary =
+            std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"));
         let missing_binary = onboard_test(
             &[Harness::Claude],
             OnboardContext {
@@ -396,7 +398,7 @@ mod tests {
             OnboardContext {
                 config: &SubConfig::default(),
                 state_dir: root.path(),
-                mcp_binary: Path::new("/bin/true"),
+                mcp_binary: &existing_binary,
                 locations: &locations,
             },
         )
@@ -414,7 +416,7 @@ mod tests {
             OnboardContext {
                 config: &cursor_config,
                 state_dir: root.path(),
-                mcp_binary: Path::new("/bin/true"),
+                mcp_binary: &existing_binary,
                 locations: &locations,
             },
         )
