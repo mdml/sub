@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::process::CommandExt as _;
 use std::path::Path;
 use std::process::Command;
 
@@ -18,15 +20,22 @@ pub(super) const CANCEL_GRACE_PERIOD: std::time::Duration = std::time::Duration:
 pub(super) const CANCEL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(super) fn supervisor_command(executable: &Path) -> Command {
-    #[cfg(target_os = "linux")]
-    {
-        let mut command = Command::new("setsid");
-        command.arg("-f").arg(executable);
-        command
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        Command::new(executable)
+    let mut command = Command::new(executable);
+    configure_detached_session(&mut command);
+    command
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn configure_detached_session(command: &mut Command) {
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
     }
 }
 

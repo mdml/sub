@@ -23,6 +23,8 @@ homepage = "https://github.com/mdml/sub"
 # docs/decisions/2026-08-27-acp-sdk.md.
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
 agent-client-protocol = "=2.0.0"
+async-process = "=2.5.0"
+futures = "=0.3.34"
 sub-sdk = { path = "crates/sub-sdk", version = "=0.0.0" }
 sub-harness-fake = { path = "crates/sub-harness-fake", version = "=0.0.0" }
 sub-adapter-claude = { path = "crates/sub-adapter-claude", version = "=0.0.0" }
@@ -34,9 +36,10 @@ toml = "=0.9.8"
 toml_edit = "=0.25.3"
 sha2 = "=0.10.9"
 hex = "=0.4.3"
+libc = "=0.2.189"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]

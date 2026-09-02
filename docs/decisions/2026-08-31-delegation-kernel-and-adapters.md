@@ -1,6 +1,6 @@
 # Delegation kernel, durable handles, results, and adapter side channels
 
-Date: 2026-08-31. Status: adopted.
+Date: 2026-08-31. Status: superseded in part on 2026-09-02 by [Portable Unix supervisor detachment and identity](2026-09-02-portable-unix-supervision.md); the kernel and adapter boundaries remain adopted.
 
 ## Decision
 

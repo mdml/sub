@@ -69,6 +69,12 @@ fn liveness_rejects_missing_process_identity() {
 }
 
 #[test]
+fn supervisor_command_invokes_the_executable_directly() {
+    let command = supervisor_command(Path::new("/bin/true"));
+    assert_eq!(command.get_program(), "/bin/true");
+}
+
+#[test]
 fn handle_validation_rejects_wrong_length_and_case() {
     for id in ["tsk_1234", "tsk_AAAAAAAAAAAAAAAAAAAAAAAA"] {
         assert!(matches!(
