@@ -28,14 +28,14 @@ The first dispatch should leave `confirm` false. Its summary shows the resolved 
 2. Derives the next 0.x version from Conventional Commits since the last stable tag: breaking changes and `feat` produce a minor bump; all other releases produce a patch bump. `version_override` accepts an exact, advancing `0.x.y` version.
 3. Cuts `CHANGELOG.md`, refreshes workspace versions, and runs the full gate with whole-tree CodeScene before committing release preparation.
 4. Proves that the release-prep commit cherry-picks cleanly onto current `staging`. A conflict stops the run without a remote change.
-5. Atomically pushes `stable`, the stable tag, and a `chore/stable-release-vX.Y.Z` reconciliation branch. It opens a small PR from that branch into `staging` and explicitly dispatches its full gate.
+5. Uses the repository's release deploy key to atomically push `stable`, the stable tag, and a `chore/stable-release-vX.Y.Z` reconciliation branch over SSH. It opens a small PR from that branch into `staging` and explicitly dispatches its full gate.
 6. Dispatches the generated cargo-dist release workflow for the new tag. cargo-dist builds, attests, and publishes the stable GitHub Release and Homebrew formula.
 
 The base must resolve to a nightly tag on `main`. `allow_untagged_base` is an explicit emergency override and is called out in the run summary. No human creates a release tag.
 
 ## Initial setup and rulesets
 
-Before the first release, create `mdml/homebrew-tap` and configure `HOMEBREW_TAP_TOKEN`. The owner must also create the `stable` branch and release-tag rulesets with the commands in the release-channel decision record. Apply the rulesets before the first confirmed promotion; do not create `stable` manually. The workflow's GitHub Actions bypass then creates the protected branch.
+Before the first release, create `mdml/homebrew-tap` and configure `HOMEBREW_TAP_TOKEN`. The owner must also create the release deploy key and the `stable` branch and release-tag rulesets with the commands in the release-channel decision record. Apply the rulesets before the first confirmed promotion; do not create `stable` manually. The workflow's deploy-key bypass then creates the protected branch.
 
 No `main` ruleset change is required: the existing rule already requires the `verify-full` context, allows only merge-commit PRs, and blocks deletion and non-fast-forward updates.
 

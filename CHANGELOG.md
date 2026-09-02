@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - Add a clearly named macOS CI job that runs the workspace tests and fake-harness contract without real harnesses or CodeScene.
-- Nightly GitHub prereleases built outside cargo-dist tag planning, a preview/confirm stable-promotion workflow with `stable-candidate` defaults and 0.x Conventional Commit versioning, and documented workflow-only branch/tag rulesets.
+- Nightly GitHub prereleases built outside cargo-dist tag planning, a preview/confirm stable-promotion workflow with `stable-candidate` defaults and 0.x Conventional Commit versioning, and deploy-key-only branch/tag rulesets.
 - Structured bug and feature issue forms, harness/regression/stable-candidate labels, reporting-flow documentation, and CLI `sub report <handle>` for scrubbed, reviewable issue commands without submission or credential access.
 - A `sub`-failure section in the installed delegation skill that hands report drafts to the user and forbids managers from filing issues.
 - Real `sub-adapter-cursor` support under the canonical `cursor` harness name: native `cursor-agent acp` launch with no bridge, native permission modes, prompt-level subagent guard plus Cursor task observation, false/false usage support, `session/load` recovery without replay double counting, onboarding, a stamped real-stream fixture and contract run, and a non-gating Cursor beta-path variant.
