@@ -1,6 +1,7 @@
 //! `sub` command-line surface.
 
 mod onboarding;
+mod report;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -259,12 +260,13 @@ async fn run() -> Result<(), String> {
         Some("cancel") => cancel(&args)?,
         Some("list") => list_command(&args)?,
         Some("inspect") => inspect_command(&args)?,
+        Some("report") => report::report_command(&args)?,
         Some("onboard") => onboard_command(&args)?,
         Some("__supervise") => supervise(&args).await?,
         Some("--version" | "-V") | None => println!("sub {}", sub_sdk::version()),
         _ => {
             return Err(
-                "usage: sub <onboard|bridge install|launch|wait|recover|cancel|list|inspect>"
+                "usage: sub <onboard|bridge install|launch|wait|recover|cancel|list|inspect|report>"
                     .to_owned(),
             );
         }
