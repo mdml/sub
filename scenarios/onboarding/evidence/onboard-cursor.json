@@ -1,0 +1,8 @@
+[
+  {
+    "harness": "cursor",
+    "bridge": {"status": "not_required", "path": "$CURSOR_BIN"},
+    "skill": {"status": "created", "path": "$CURSOR_ROOT/skills/sub-delegation/SKILL.md"},
+    "mcp": {"status": "created", "path": "$CURSOR_ROOT/mcp.json"}
+  }
+]

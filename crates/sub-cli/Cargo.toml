@@ -16,6 +16,7 @@ path = "src/main.rs"
 sub-sdk.workspace = true
 sub-adapter-claude.workspace = true
 sub-adapter-codex.workspace = true
+sub-adapter-cursor.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

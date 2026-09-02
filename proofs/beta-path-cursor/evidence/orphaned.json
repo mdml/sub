@@ -1,0 +1,7 @@
+{
+  "verified_supervisor_command": "$SUB_BIN __supervise $HANDLE 1 --state-dir $STATE_DIR",
+  "task": {"handle": {"id": "$HANDLE"}, "harness": "cursor", "status": "orphaned"},
+  "attempts": [
+    {"number": 1, "status": "orphaned", "harness_session_id": "$CURSOR_SESSION_ID", "usage": {"cost": null, "tokens": null}}
+  ]
+}

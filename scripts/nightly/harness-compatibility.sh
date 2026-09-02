@@ -30,7 +30,7 @@ log ""
 log "harness-compatibility: adapter declared versions"
 log "  sub-adapter-claude: bridge @agentclientprotocol/claude-agent-acp@0.70.0; claude 2.1.246, 2.1.251"
 log "  sub-adapter-codex: bridge @agentclientprotocol/codex-acp@1.6.2; codex 0.149.1, 0.151.0"
-log "  sub-adapter-cursor: not declared yet"
+log "  sub-adapter-cursor: native ACP v1; cursor-agent 2026.08.25-3e8eec8"
 log "  version mismatches are reported only"
 
 log ""

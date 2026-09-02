@@ -44,6 +44,7 @@ fn parse_harness(value: &str) -> Result<Harness, String> {
     match value {
         "claude" => Ok(Harness::Claude),
         "codex" => Ok(Harness::Codex),
+        "cursor" => Ok(Harness::CursorAgent),
         _ => Err(format!("unsupported harness: {value}")),
     }
 }
@@ -95,6 +96,12 @@ fn adapter(harness: Harness, root: &Path, binary: &Path) -> Result<AdapterLaunch
             delegation_guard: sub_adapter_codex::DELEGATION_GUARD.to_owned(),
             resume_mechanism: sub_adapter_codex::RESUME_MECHANISM,
         }),
+        Harness::CursorAgent => Ok(AdapterLaunch {
+            bridge: sub_adapter_cursor::launch(binary),
+            session_meta: sub_adapter_cursor::session_meta(),
+            delegation_guard: sub_adapter_cursor::DELEGATION_GUARD.to_owned(),
+            resume_mechanism: sub_adapter_cursor::RESUME_MECHANISM,
+        }),
     }
 }
 
@@ -105,13 +112,24 @@ fn tool_state_dir(args: &Value, config: &SubConfig) -> Result<PathBuf, String> {
 fn install_bridge_tool(args: &Value, config: &SubConfig) -> Result<Value, String> {
     let harness = string_arg(args, "harness")?;
     let root = tool_state_dir(args, config)?;
-    let binary = match harness {
-        "claude" => sub_adapter_claude::install_bridge(&root),
-        "codex" => sub_adapter_codex::install_bridge(&root),
-        _ => return Err(format!("unsupported harness: {harness}")),
+    match harness {
+        "claude" => sub_adapter_claude::install_bridge(&root)
+            .map(|binary| json!({"bridge_binary": binary}))
+            .map_err(|error| error.to_string()),
+        "codex" => sub_adapter_codex::install_bridge(&root)
+            .map(|binary| json!({"bridge_binary": binary}))
+            .map_err(|error| error.to_string()),
+        "cursor" => {
+            let configured = config
+                .harness(Harness::CursorAgent)
+                .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?;
+            let bridge = sub_adapter_cursor::install_bridge(&configured.binary);
+            Ok(
+                json!({"bridge_binary": bridge.binary, "required": false, "message": bridge.message}),
+            )
+        }
+        _ => Err(format!("unsupported harness: {harness}")),
     }
-    .map_err(|error| error.to_string())?;
-    Ok(json!({"bridge_binary": binary}))
 }
 
 fn launch_tool(args: &Value, config: &SubConfig) -> Result<Value, String> {
@@ -193,13 +211,13 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
 
 fn tools() -> Value {
     json!({"tools":[
-        {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle. Configured harness defaults supply omitted binary, model, and permission mode.","inputSchema":{"type":"object","required":["harness","prompt","cwd"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
+        {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle. Configured harness defaults supply omitted binary, model, and permission mode.","inputSchema":{"type":"object","required":["harness","prompt","cwd"],"properties":{"harness":{"type":"string","enum":["claude","codex","cursor"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_wait","description":"Wait up to a timeout for a delegated task result; re-wait with the same handle if still running.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":0},"state_dir":{"type":"string"}}}},
         {"name":"sub_recover","description":"Start a new attempt that resumes an orphaned task's recorded harness session.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_cancel","description":"Request cancellation of one task's latest attempt and return the delivery disposition immediately.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_list","description":"List delegated tasks by reading the state directory without contacting supervisors or harnesses.","inputSchema":{"type":"object","properties":{"state_dir":{"type":"string"}}}},
         {"name":"sub_inspect","description":"Inspect one task's status, normalized events, cost, and tokens by reading the state directory.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
-        {"name":"sub_bridge_install","description":"Explicitly install one exact pinned ACP bridge and write its integrity manifest.","inputSchema":{"type":"object","required":["harness"],"properties":{"harness":{"type":"string","enum":["claude","codex"]},"state_dir":{"type":"string"}}}}
+        {"name":"sub_bridge_install","description":"Install or verify a harness's ACP transport. Cursor uses native ACP and reports that no bridge is required.","inputSchema":{"type":"object","required":["harness"],"properties":{"harness":{"type":"string","enum":["claude","codex","cursor"]},"state_dir":{"type":"string"}}}}
     ]})
 }
 
@@ -326,7 +344,34 @@ mod tests {
                 "sub_bridge_install"
             ]
         );
-        assert!(parse_harness("cursor").is_err());
+        assert_eq!(parse_harness("cursor"), Ok(Harness::CursorAgent));
+        let config = SubConfig {
+            harnesses: sub_sdk::config::HarnessConfigs {
+                cursor: Some(sub_sdk::config::HarnessConfig {
+                    binary: PathBuf::from("/bin/cursor-agent"),
+                    model: None,
+                    permission_mode: Some("agent".to_owned()),
+                }),
+                ..sub_sdk::config::HarnessConfigs::default()
+            },
+            ..SubConfig::default()
+        };
+        let prepared = adapter(
+            Harness::CursorAgent,
+            Path::new("/unused"),
+            Path::new("/bin/cursor-agent"),
+        )
+        .unwrap_or_else(|error| panic!("cursor adapter: {error}"));
+        assert_eq!(prepared.bridge.args(), &["acp"]);
+        assert_eq!(
+            prepared.resume_mechanism,
+            sub_sdk::delegation::ResumeMechanism::Load
+        );
+        let installed =
+            install_bridge_tool(&json!({"harness":"cursor","state_dir":"/unused"}), &config)
+                .unwrap_or_else(|error| panic!("cursor bridge: {error}"));
+        assert_eq!(installed["required"], false);
+        assert_eq!(installed["bridge_binary"], "/bin/cursor-agent");
     }
 
     #[tokio::test]
@@ -343,6 +388,12 @@ mod tests {
             .await
             .unwrap_or_else(|| panic!("response"));
         assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(7));
+        let launch_harnesses =
+            &listed["result"]["tools"][0]["inputSchema"]["properties"]["harness"]["enum"];
+        assert_eq!(launch_harnesses, &json!(["claude", "codex", "cursor"]));
+        let bridge_harnesses =
+            &listed["result"]["tools"][6]["inputSchema"]["properties"]["harness"]["enum"];
+        assert_eq!(bridge_harnesses, &json!(["claude", "codex", "cursor"]));
         let missing = respond(json!({"jsonrpc":"2.0","id":4,"method":"unknown"}))
             .await
             .unwrap_or_else(|| panic!("response"));
@@ -384,7 +435,7 @@ mod tests {
         assert!(cancel_error.contains("unknown task"));
         let install_error = call_tool(
             "sub_bridge_install",
-            &json!({"harness":"cursor","state_dir":root_text}),
+            &json!({"harness":"unknown","state_dir":root_text}),
         )
         .await
         .err()

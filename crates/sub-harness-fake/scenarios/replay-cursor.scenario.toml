@@ -1,0 +1,2 @@
+fixture = "cursor-hello"
+behavior = "replay"

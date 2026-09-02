@@ -1219,8 +1219,8 @@ dependencies = [
 name = "sub-adapter-cursor"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
  "sub-sdk",
- "tokio",
 ]
 
 [[package]]
@@ -1231,6 +1231,7 @@ dependencies = [
  "serde_json",
  "sub-adapter-claude",
  "sub-adapter-codex",
+ "sub-adapter-cursor",
  "sub-sdk",
  "tempfile",
  "tokio",
@@ -1259,6 +1260,7 @@ dependencies = [
  "serde_json",
  "sub-adapter-claude",
  "sub-adapter-codex",
+ "sub-adapter-cursor",
  "sub-sdk",
  "tempfile",
  "tokio",

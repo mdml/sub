@@ -26,4 +26,4 @@ The nightly reads `SUB_CONTRACT_CLAUDE_CMD` and `SUB_CONTRACT_CODEX_CMD` for pre
 
 ## Status
 
-The contract suite, fake harness, Claude adapter, and Codex adapter exist. The nightly reports their pinned and verified versions; automatic comparison and the Cursor adapter remain later work.
+The contract suite, fake harness, and all three adapters exist. The nightly reports the pinned bridge versions and each adapter's verified harness versions, then exercises Claude, Codex, and native-ACP Cursor Agent. Automatic version comparison remains later work.

@@ -84,7 +84,7 @@ fn command_errors_are_actionable() {
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let binary = env!("CARGO_BIN_EXE_sub");
     let unsupported = Command::new(binary)
-        .args(["bridge", "install", "cursor", "--state-dir"])
+        .args(["bridge", "install", "unknown", "--state-dir"])
         .arg(root.path())
         .output()
         .unwrap_or_else(|error| panic!("run: {error}"));
@@ -388,7 +388,7 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
     std::fs::write(
         &config,
         format!(
-            "state_dir = '{}'\n[harnesses.claude]\nbinary = '/bin/true'\npermission_mode = 'bypassPermissions'\n[harnesses.codex]\nbinary = '/bin/true'\npermission_mode = 'agent'\n",
+            "state_dir = '{}'\n[harnesses.claude]\nbinary = '/bin/true'\npermission_mode = 'bypassPermissions'\n[harnesses.codex]\nbinary = '/bin/true'\npermission_mode = 'agent'\n[harnesses.cursor]\nbinary = '/bin/true'\npermission_mode = 'agent'\n",
             state.display()
         ),
     )
@@ -397,6 +397,8 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
     let claude_skills = root.path().join("claude/skills");
     let codex_config = root.path().join("codex/config.toml");
     let codex_skills = root.path().join("codex/skills");
+    let cursor_config = root.path().join("cursor/mcp.json");
+    let cursor_skills = root.path().join("cursor/skills");
     let binary = env!("CARGO_BIN_EXE_sub");
     let path = fake_npm(root.path());
     let run = |harnesses: &[&str]| {
@@ -408,6 +410,8 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
             .env("SUB_CLAUDE_SKILLS_DIR", &claude_skills)
             .env("SUB_CODEX_CONFIG", &codex_config)
             .env("SUB_CODEX_SKILLS_DIR", &codex_skills)
+            .env("SUB_CURSOR_CONFIG", &cursor_config)
+            .env("SUB_CURSOR_SKILLS_DIR", &cursor_skills)
             .env("SUB_MCP_BINARY", "/bin/true")
             .env("PATH", &path)
             .output()
@@ -420,10 +424,17 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
     assert!(claude_skills.join("sub-delegation/SKILL.md").is_file());
     assert!(!codex_config.exists());
     assert!(!codex_skills.exists());
+    assert!(!cursor_config.exists());
+    assert!(!cursor_skills.exists());
 
     let first_codex = run(&["codex"]);
     assert!(first_codex.status.success());
-    let second = run(&["claude", "codex"]);
+    let first_cursor = run(&["cursor"]);
+    assert!(first_cursor.status.success());
+    let first_cursor_report: serde_json::Value = serde_json::from_slice(&first_cursor.stdout)
+        .unwrap_or_else(|error| panic!("cursor report: {error}"));
+    assert_eq!(first_cursor_report[0]["bridge"]["status"], "not_required");
+    let second = run(&["claude", "codex", "cursor"]);
     assert!(
         second.status.success(),
         "{}",
@@ -432,11 +443,21 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
     let report: serde_json::Value =
         serde_json::from_slice(&second.stdout).unwrap_or_else(|error| panic!("report: {error}"));
     for harness in report.as_array().unwrap_or_else(|| panic!("array")) {
-        assert_eq!(harness["bridge"]["status"], "unchanged");
+        if harness["harness"] == "cursor" {
+            assert_eq!(harness["bridge"]["status"], "not_required");
+        } else {
+            assert_eq!(harness["bridge"]["status"], "unchanged");
+        }
         assert_eq!(harness["skill"]["status"], "unchanged");
         assert_eq!(harness["mcp"]["status"], "unchanged");
     }
     assert!(codex_skills.join("sub-delegation/SKILL.md").is_file());
+    assert!(cursor_skills.join("sub-delegation/SKILL.md").is_file());
+    let cursor: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&cursor_config).unwrap_or_else(|error| panic!("cursor config: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("cursor json: {error}"));
+    assert_eq!(cursor["mcpServers"]["sub"]["command"], "/bin/true");
     assert!(
         std::fs::read_to_string(codex_config)
             .unwrap_or_else(|error| panic!("codex config: {error}"))

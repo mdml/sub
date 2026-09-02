@@ -32,6 +32,9 @@ pub enum Harness {
     Claude,
     /// `OpenAI Codex`.
     Codex,
+    /// Cursor Agent.
+    #[serde(rename = "cursor", alias = "cursor_agent")]
+    CursorAgent,
 }
 
 impl Harness {
@@ -39,6 +42,7 @@ impl Harness {
         match self {
             Self::Claude => UsageSupport::claude(),
             Self::Codex => UsageSupport::codex(),
+            Self::CursorAgent => UsageSupport::cursor_agent(),
         }
     }
 }
@@ -68,6 +72,15 @@ impl UsageSupport {
         Self {
             cost: false,
             tokens: true,
+        }
+    }
+
+    /// Cursor Agent support verified by the real-harness contract suite.
+    #[must_use]
+    pub const fn cursor_agent() -> Self {
+        Self {
+            cost: false,
+            tokens: false,
         }
     }
 }
@@ -1248,20 +1261,29 @@ fn native_session_reference(harness: Harness, cwd: &Path, session_id: &str) -> S
             match harness {
                 Harness::Claude => "claude",
                 Harness::Codex => "codex",
+                Harness::CursorAgent => "cursor",
             }
         );
     };
     let root = match harness {
         Harness::Claude => home.join(".claude/projects"),
         Harness::Codex => home.join(".codex/sessions"),
+        Harness::CursorAgent => home.join(".cursor/acp-sessions"),
     };
-    find_session_record(&root, session_id).map_or_else(
+    let record = if harness == Harness::CursorAgent {
+        let path = root.join(session_id);
+        path.exists().then_some(path)
+    } else {
+        find_session_record(&root, session_id)
+    };
+    record.map_or_else(
         || {
             format!(
                 "{}:{}:{}",
                 match harness {
                     Harness::Claude => "claude",
                     Harness::Codex => "codex",
+                    Harness::CursorAgent => "cursor",
                 },
                 cwd.display(),
                 session_id
@@ -2570,7 +2592,32 @@ mod tests {
         let record = nested.join("session-abc.jsonl");
         fs::write(&record, "{}").unwrap_or_else(|error| panic!("write: {error}"));
         assert_eq!(find_session_record(root.path(), "abc"), Some(record));
+        let cursor_record = root.path().join("cursor-session-id");
+        fs::create_dir(&cursor_record).unwrap_or_else(|error| panic!("cursor record: {error}"));
+        assert_eq!(find_session_record(root.path(), "cursor-session-id"), None);
+        assert!(cursor_record.exists());
         assert_eq!(find_session_record(root.path(), "missing"), None);
+    }
+
+    #[test]
+    fn cursor_usage_support_is_explicitly_absent() {
+        assert_eq!(
+            Harness::CursorAgent.usage_support(),
+            UsageSupport {
+                cost: false,
+                tokens: false
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(Harness::CursorAgent)
+                .unwrap_or_else(|error| panic!("serialize cursor: {error}")),
+            serde_json::json!("cursor")
+        );
+        assert_eq!(
+            serde_json::from_value::<Harness>(serde_json::json!("cursor_agent"))
+                .unwrap_or_else(|error| panic!("deserialize legacy cursor: {error}")),
+            Harness::CursorAgent
+        );
     }
 
     #[test]
@@ -2580,6 +2627,10 @@ mod tests {
             native_session_reference(Harness::Claude, cwd, "missing-claude").contains("claude")
         );
         assert!(native_session_reference(Harness::Codex, cwd, "missing-codex").contains("codex"));
+        assert!(
+            native_session_reference(Harness::CursorAgent, cwd, "missing-cursor")
+                .contains("cursor")
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Real `sub-adapter-cursor` support under the canonical `cursor` harness name: native `cursor-agent acp` launch with no bridge, native permission modes, prompt-level subagent guard plus Cursor task observation, false/false usage support, `session/load` recovery without replay double counting, onboarding, a stamped real-stream fixture and contract run, and a non-gating Cursor beta-path variant.
 - Beta-minimum `sub.toml` discovery with configured state directory and per-harness binary, model, and permission-mode defaults shared by CLI and MCP launch; explicit arguments retain precedence.
 - Idempotent `sub onboard <claude|codex>...` for pinned bridge installation, the `sub-delegation` manager skill, and user-level MCP registration, with per-harness action reports and throwaway-root overrides.
 - Unit and integration coverage for config discovery, launch precedence, scoped onboarding, repair/idempotence, and matching CLI/MCP `LaunchParams`.

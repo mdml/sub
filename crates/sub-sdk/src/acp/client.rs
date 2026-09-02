@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use agent_client_protocol::Agent;
@@ -13,6 +14,7 @@ use agent_client_protocol::schema::v1::{
     SetSessionModeRequest,
 };
 use agent_client_protocol::{AcpAgent, Client, ConnectionTo};
+use serde::{Deserialize, Serialize};
 
 use super::config::AcpClientConfig;
 use super::error::AcpError;
@@ -20,6 +22,21 @@ use super::launch::HarnessLaunch;
 use super::session::{PromptResult, SessionHandle, SessionStart};
 use super::stop_reason::StopReason;
 use super::update::StreamUpdate;
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcRequest)]
+#[request(method = "cursor/ask_question", response = CursorExtensionResponse)]
+struct CursorAskQuestionRequest(serde_json::Value);
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcRequest)]
+#[request(method = "cursor/create_plan", response = CursorExtensionResponse)]
+struct CursorCreatePlanRequest(serde_json::Value);
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcResponse)]
+struct CursorExtensionResponse(serde_json::Value);
+
+#[derive(Debug, Clone, Serialize, Deserialize, agent_client_protocol::JsonRpcNotification)]
+#[notification(method = "cursor/task")]
+struct CursorTaskNotification(serde_json::Value);
 
 /// Options for one prompt turn.
 #[derive(Debug, Clone, Default)]
@@ -141,6 +158,10 @@ impl AcpClient {
         let agent = AcpAgent::new(self.launch.clone().into_acp_config());
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let (update_tx, mut update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let loading_replay = Arc::new(AtomicBool::new(matches!(
+            &options.session_start,
+            SessionStart::Load(_)
+        )));
 
         Client
             .builder()
@@ -164,11 +185,60 @@ impl AcpClient {
                 },
                 agent_client_protocol::on_receive_request!(),
             )
+            .on_receive_request(
+                {
+                    let update_tx = update_tx.clone();
+                    let observer = observer.clone();
+                    let loading_replay = Arc::clone(&loading_replay);
+                    async move |_request: CursorAskQuestionRequest,
+                                responder,
+                                _connection: ConnectionTo<Agent>| {
+                        if !loading_replay.load(Ordering::Acquire) {
+                            let update = StreamUpdate::cursor_interaction_denied("ask_question");
+                            if let Some(observer) = &observer {
+                                observer(update.clone());
+                            }
+                            update_tx
+                                .send(update)
+                                .map_err(|_| agent_client_protocol::Error::internal_error())?;
+                        }
+                        responder.respond(cursor_cancelled_response())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let update_tx = update_tx.clone();
+                    let observer = observer.clone();
+                    let loading_replay = Arc::clone(&loading_replay);
+                    async move |_request: CursorCreatePlanRequest,
+                                responder,
+                                _connection: ConnectionTo<Agent>| {
+                        if !loading_replay.load(Ordering::Acquire) {
+                            let update = StreamUpdate::cursor_interaction_denied("create_plan");
+                            if let Some(observer) = &observer {
+                                observer(update.clone());
+                            }
+                            update_tx
+                                .send(update)
+                                .map_err(|_| agent_client_protocol::Error::internal_error())?;
+                        }
+                        responder.respond(cursor_cancelled_response())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
             .on_receive_notification(
                 {
+                    let update_tx = update_tx.clone();
                     let observer = observer.clone();
+                    let loading_replay = Arc::clone(&loading_replay);
                     async move |notification: SessionNotification,
                                 _connection: ConnectionTo<Agent>| {
+                        if loading_replay.load(Ordering::Acquire) {
+                            return Ok(());
+                        }
                         let update = StreamUpdate::from_session_update(&notification.update);
                         if let Some(observer) = &observer {
                             observer(update.clone());
@@ -176,6 +246,27 @@ impl AcpClient {
                         update_tx
                             .send(update)
                             .map_err(|_| agent_client_protocol::Error::internal_error())
+                    }
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .on_receive_notification(
+                {
+                    let update_tx = update_tx.clone();
+                    let observer = observer.clone();
+                    let loading_replay = Arc::clone(&loading_replay);
+                    async move |_notification: CursorTaskNotification,
+                                _connection: ConnectionTo<Agent>| {
+                        if !loading_replay.load(Ordering::Acquire) {
+                            let update = StreamUpdate::subagent_observed();
+                            if let Some(observer) = &observer {
+                                observer(update.clone());
+                            }
+                            update_tx
+                                .send(update)
+                                .map_err(|_| agent_client_protocol::Error::internal_error())?;
+                        }
+                        Ok(())
                     }
                 },
                 agent_client_protocol::on_receive_notification!(),
@@ -222,6 +313,7 @@ impl AcpClient {
                             request = request.meta(meta);
                         }
                         connection.send_request(request).block_task().await?;
+                        loading_replay.store(false, Ordering::Release);
                         session_id.clone().into()
                     }
                 };
@@ -335,6 +427,10 @@ fn deny_permission(
 
 fn permission_response() -> RequestPermissionResponse {
     RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
+}
+
+fn cursor_cancelled_response() -> CursorExtensionResponse {
+    CursorExtensionResponse(serde_json::json!({"outcome":{"outcome":"cancelled"}}))
 }
 
 #[cfg(test)]

@@ -2,11 +2,11 @@
 
 Give the coding agent you already use subagents from any supported coding harness, with one durable place to observe the delegated work and retrieve its result.
 
-`sub` is in pre-beta. Claude Code and Codex can be configured and onboarded, launch one bounded child task under an independent supervisor, wait on the returned durable handle, independently observe task status and evidence, recover an orphaned harness session, and cancel a running child through CLI or MCP.
+`sub` is in pre-beta. Claude Code, Codex, and Cursor Agent can be configured and onboarded, launch one bounded child task under an independent supervisor, wait on the returned durable handle, independently observe task status and evidence, recover an orphaned harness session, and cancel a running child through CLI or MCP.
 
 ## Status
 
-The four beta feature proofs pass: Delegate from a real Claude Code manager to a real Codex child, Observe through independent CLI and MCP processes, Recover through replacement-manager wait and replacement-supervisor session resume, and Control through cross-process cancellation. The composed delegate → observe → recover → cancel path also passes on one real task. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), [`docs/proofs/control.md`](docs/proofs/control.md), and [`docs/proofs/beta-path.md`](docs/proofs/beta-path.md).
+The four beta feature proofs pass: Delegate from a real Claude Code manager to a real Codex child, Observe through independent CLI and MCP processes, Recover through replacement-manager wait and replacement-supervisor session resume, and Control through cross-process cancellation. The composed delegate → observe → recover → cancel path passes on one real Codex task; a non-gating Cursor-child variant passes through replaying `session/load`. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), [`docs/proofs/control.md`](docs/proofs/control.md), [`docs/proofs/beta-path.md`](docs/proofs/beta-path.md), and [`docs/proofs/beta-path-cursor.md`](docs/proofs/beta-path-cursor.md).
 
 ## Configure and onboard
 
@@ -23,13 +23,17 @@ permission_mode = "bypassPermissions"
 binary = "/home/alice/.local/bin/codex"
 model = "gpt-5"
 permission_mode = "agent"
+
+[harnesses.cursor]
+binary = "/home/alice/.local/bin/cursor-agent"
+permission_mode = "agent"
 ```
 
-Build both surfaces, then explicitly onboard only the requested manager harnesses. `npm` is required while onboarding installs each exact pinned bridge. The same action installs the `sub-delegation` manager skill and registers the adjacent `sub-mcp` binary in each named harness's user configuration.
+Build both surfaces, then explicitly onboard only the requested manager harnesses. `npm` is required while onboarding installs the exact pinned Claude and Codex bridges; Cursor Agent speaks ACP v1 natively, so its bridge step reports `not_required`. The same action installs the `sub-delegation` manager skill and registers the adjacent `sub-mcp` binary in each named harness's user configuration.
 
 ```sh
 cargo build -p sub-cli -p sub-mcp
-target/debug/sub onboard claude codex
+target/debug/sub onboard claude codex cursor
 ```
 
 Re-running onboarding repairs stale files or reports `unchanged`; it never configures an unnamed harness. `sub` uses each harness's existing authentication and never holds credentials. See [`docs/decisions/2026-09-01-onboarding-installation.md`](docs/decisions/2026-09-01-onboarding-installation.md).

@@ -1,0 +1,9 @@
+{
+  "recover": {"handle": {"id": "$HANDLE"}, "attempt": 2},
+  "task_status": "running",
+  "attempts": [
+    {"number": 1, "status": "orphaned", "harness_session_id": "$CURSOR_SESSION_ID"},
+    {"number": 2, "status": "running", "harness_session_id": "$CURSOR_SESSION_ID"}
+  ],
+  "new_lifecycle_events": ["attempt_orphaned", "attempt_started", "attempt_resumed"]
+}
