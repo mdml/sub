@@ -23,8 +23,8 @@ install-updater = false
 checksum = "sha256"
 # Sign and attest artifacts with GitHub artifact attestations (Sigstore, keyless)
 github-attestations = true
-# Stable promotion creates the tag with GITHUB_TOKEN and explicitly dispatches
-# the generated workflow because token-created tag events do not recurse.
+# Stable promotion creates its tag over SSH with the release deploy key and
+# explicitly dispatches this workflow so nightly tags never invoke cargo-dist.
 dispatch-releases = true
 # Nightlies use their own GitHub-prerelease workflow; package-manager publishing
 # is reserved for stable cargo-dist tags.

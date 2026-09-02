@@ -143,6 +143,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ env.RELEASE_SHA }}
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: nightly-*
@@ -150,6 +151,10 @@ jobs:
           merge-multiple: true
       - name: Tag the verified main tip
         run: |
+          case "$(git remote get-url --push origin)" in
+            git@github.com:* | ssh://git@github.com/*) ;;
+            *) echo "release ref writes require the SSH deploy key" >&2; exit 1 ;;
+          esac
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git tag -a "$RELEASE_TAG" "$RELEASE_SHA" -m "Nightly $RELEASE_TAG"
