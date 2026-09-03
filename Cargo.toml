@@ -32,7 +32,7 @@ sub-adapter-codex = { path = "crates/sub-adapter-codex", version = "=0.0.0" }
 sub-adapter-cursor = { path = "crates/sub-adapter-cursor", version = "=0.0.0" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
-toml = "=0.9.8"
+toml = "=1.1.4"
 toml_edit = "=0.25.13"
 sha2 = "=0.11.0"
 hex = "=0.4.3"
