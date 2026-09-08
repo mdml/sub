@@ -67,6 +67,10 @@ The MCP server also exposes `sub_list` and `sub_inspect`. Both surfaces serializ
 
 If `sub` itself misbehaves, `sub report tsk_REPLACE_WITH_HANDLE` prints a scrubbed `gh issue create` command for the user to review. It never submits the issue or accesses credentials. See [`docs/reporting.md`](docs/reporting.md).
 
+## Install
+
+Releases ship for Linux x86_64 and aarch64. Stable releases are distributed through Homebrew, mise, and `cargo binstall`; nightly archives are published as GitHub prereleases. See [`docs/release.md`](docs/release.md) for channels and installation details. macOS returns to the shipped target list when the beta path has been run with real harnesses on macOS and recorded under `docs/proofs/`; its supervision code and fake-harness CI remain as preparation.
+
 ## Build
 
 Requirements: `rustup` (the toolchain in `rust-toolchain.toml` installs itself on first use) and, for the verification tools, [`mise`](https://mise.jdx.dev).
