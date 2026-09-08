@@ -1,9 +1,9 @@
 [workspace]
 members = ["cargo:."]
 
-# Config for 'dist' (cargo-dist). Rationale and the steps still required
-# before a first release: docs/decisions/2026-08-27-release-tooling.md and
-# docs/release.md. No release has been cut; the workflow runs only on v* tags.
+# Config for 'dist' (cargo-dist). Rationale: docs/decisions/2026-08-27-release-tooling.md
+# and docs/release.md. Publishing is dispatch-only for stable releases;
+# nightly prereleases already exist and use a separate workflow.
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
 cargo-dist-version = "0.32.0"
