@@ -46,7 +46,7 @@ The base ref defaults to `origin/staging`. Override it with `scripts/verify.sh -
 | `per-commit.yml` / `verify` | Pull request into `staging` | Full gate relative to `staging`. |
 | `per-commit.yml` / `macOS test suite (fake harness)` | Push to any branch except `main` and `staging`; pull request into `staging` | Workspace test suite on `macos-latest`, including the fake-harness contract; no real harnesses or CodeScene. |
 | `full.yml` / `verify-full` | Pull request into `main` | Full gate relative to `main`. |
-| `nightly.yml` | Daily at 06:17 UTC; manual | Whole-tree full gate and GitHub prerelease when `main` moved; dependency-freshness report. |
+| `nightly.yml` | Daily at 06:17 UTC; manual | Unconditional vulnerability check (`cargo deny --locked check advisories`) and dependency-freshness report; whole-tree full gate and GitHub prerelease only when `main` moved. |
 | `promote-stable.yml` | Manual preview and confirmed dispatch | Whole-tree full gate for the assembled stable pointer before any release ref is pushed. |
 | `release.yml` | Pull requests for release planning; explicit stable dispatch for publishing | Generated cargo-dist release plan/build or stable publication; see [`release.md`](release.md). |
 

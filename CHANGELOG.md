@@ -6,12 +6,18 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Ship nightly and stable releases only for Linux x86_64 and aarch64 until a real-harness beta-path proof is recorded on macOS; retain macOS supervision and fake-harness CI as preparation.
+
 - Stamp nightly build checkouts with their prerelease tag version, verify `sub --version` before packaging, and document mise's replacement GitHub backend for Release installs.
 - Make detached supervision and PID-reuse-safe orphan detection uniform across Linux and macOS by using in-process `setsid(2)` and platform process start identities; force-terminate and reap an ignored-cancel child before publishing its cancelled result.
 - Establish `staging`, `main`, and `stable` as development, nightly, and assembled stable channels, with merge-commit promotion into `main`, workflow-owned tags, whole-tree release gates, stable-only Homebrew publishing, and automated release-prep reconciliation to `staging`.
 - Require the full verification gate on every pull request and the fast gate on every branch commit, with CodeScene score 10 enforced for the appropriate changed-file set and mandatory credentials in both CI workflows.
 - Refactor the delegation kernel, ACP client, CLI, MCP, fake harness, and contract tests into focused modules while preserving public and serialized shapes; the whole tracked Rust tree now establishes a CodeScene health-10 baseline for all scorable files.
 - Align harness-nightly and release-trigger documentation with the implemented scripts and workflows.
+
+### Fixed
+
+- Restore the unconditional GitHub nightly vulnerability check so advisories are checked even when `main` has not moved, while retaining full verification only for changed release candidates.
 
 ### Added
 
