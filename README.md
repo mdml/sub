@@ -24,7 +24,7 @@ binary = "/home/alice/.local/bin/codex"
 model = "gpt-5"
 permission_mode = "agent"
 
-[harnesses.cursor]
+[harnesses.cursor-agent]
 binary = "/home/alice/.local/bin/cursor-agent"
 permission_mode = "agent"
 ```
@@ -33,7 +33,7 @@ Build both surfaces, then explicitly onboard only the requested manager harnesse
 
 ```sh
 cargo build -p sub-cli -p sub-mcp
-target/debug/sub onboard claude codex cursor
+target/debug/sub onboard claude codex cursor-agent
 ```
 
 Re-running onboarding repairs stale files or reports `unchanged`; it never configures an unnamed harness. `sub` uses each harness's existing authentication and never holds credentials. See [`docs/decisions/2026-09-01-onboarding-installation.md`](docs/decisions/2026-09-01-onboarding-installation.md).

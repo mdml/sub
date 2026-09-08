@@ -142,7 +142,7 @@ fn onboard_harness(harness: Harness, context: &OnboardContext<'_>) -> Result<Rep
             let binary = &context
                 .config
                 .harness(Harness::CursorAgent)
-                .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?
+                .ok_or_else(|| "cursor-agent is not configured in sub.toml".to_owned())?
                 .binary;
             let bridge = sub_adapter_cursor::install_bridge(binary);
             (Status::NotRequired, bridge.binary)
@@ -296,7 +296,7 @@ const fn harness_name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "claude",
         Harness::Codex => "codex",
-        Harness::CursorAgent => "cursor",
+        Harness::CursorAgent => "cursor-agent",
     }
 }
 
@@ -412,7 +412,7 @@ mod tests {
         assert!(!locations.claude_config.exists());
 
         let cursor_config: SubConfig = toml::from_str(
-            "[harnesses.cursor]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
+            "[harnesses.cursor-agent]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
         )
         .unwrap_or_else(|error| panic!("cursor config: {error}"));
         let reports = onboard_test(

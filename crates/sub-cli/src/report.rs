@@ -79,7 +79,7 @@ const fn harness_name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "claude",
         Harness::Codex => "codex",
-        Harness::CursorAgent => "cursor",
+        Harness::CursorAgent => "cursor-agent",
     }
 }
 

@@ -10,7 +10,7 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
     std::fs::write(
         &config,
         format!(
-            "state_dir = '{}'\n[harnesses.claude]\nbinary = '{binary}'\npermission_mode = 'bypassPermissions'\n[harnesses.codex]\nbinary = '{binary}'\npermission_mode = 'agent'\n[harnesses.cursor]\nbinary = '{binary}'\npermission_mode = 'agent'\n",
+            "state_dir = '{}'\n[harnesses.claude]\nbinary = '{binary}'\npermission_mode = 'bypassPermissions'\n[harnesses.codex]\nbinary = '{binary}'\npermission_mode = 'agent'\n[harnesses.cursor-agent]\nbinary = '{binary}'\npermission_mode = 'agent'\n",
             state.display(),
         ),
     )
@@ -50,10 +50,10 @@ fn onboarding_is_scoped_and_idempotent_in_throwaway_roots() {
 
     let first_codex = run(&["codex"]);
     assert!(first_codex.status.success());
-    let first_cursor = run(&["cursor"]);
+    let first_cursor = run(&["cursor-agent"]);
     assert!(first_cursor.status.success());
     assert_cursor_report(&first_cursor.stdout);
-    let second = run(&["claude", "codex", "cursor"]);
+    let second = run(&["claude", "codex", "cursor-agent"]);
     assert!(
         second.status.success(),
         "{}",
@@ -84,7 +84,7 @@ fn assert_idempotent_report(stdout: &[u8]) {
     let report: serde_json::Value =
         serde_json::from_slice(stdout).unwrap_or_else(|error| panic!("report: {error}"));
     for harness in report.as_array().unwrap_or_else(|| panic!("array")) {
-        let bridge = if harness["harness"] == "cursor" {
+        let bridge = if harness["harness"] == "cursor-agent" {
             "not_required"
         } else {
             "unchanged"

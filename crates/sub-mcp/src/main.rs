@@ -44,7 +44,7 @@ fn parse_harness(value: &str) -> Result<Harness, String> {
     match value {
         "claude" => Ok(Harness::Claude),
         "codex" => Ok(Harness::Codex),
-        "cursor" => Ok(Harness::CursorAgent),
+        "cursor-agent" => Ok(Harness::CursorAgent),
         _ => Err(format!("unsupported harness: {value}")),
     }
 }
@@ -119,10 +119,10 @@ fn install_bridge_tool(args: &Value, config: &SubConfig) -> Result<Value, String
         "codex" => sub_adapter_codex::install_bridge(&root)
             .map(|binary| json!({"bridge_binary": binary}))
             .map_err(|error| error.to_string()),
-        "cursor" => {
+        "cursor-agent" => {
             let configured = config
                 .harness(Harness::CursorAgent)
-                .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?;
+                .ok_or_else(|| "cursor-agent is not configured in sub.toml".to_owned())?;
             let bridge = sub_adapter_cursor::install_bridge(&configured.binary);
             Ok(
                 json!({"bridge_binary": bridge.binary, "required": false, "message": bridge.message}),
@@ -211,13 +211,13 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
 
 fn tools() -> Value {
     json!({"tools":[
-        {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle. Configured harness defaults supply omitted binary, model, and permission mode.","inputSchema":{"type":"object","required":["harness","prompt","cwd"],"properties":{"harness":{"type":"string","enum":["claude","codex","cursor"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
+        {"name":"sub_launch","description":"Launch one bounded delegated task and immediately return its handle. Configured harness defaults supply omitted binary, model, and permission mode.","inputSchema":{"type":"object","required":["harness","prompt","cwd"],"properties":{"harness":{"type":"string","enum":["claude","codex","cursor-agent"]},"prompt":{"type":"string"},"cwd":{"type":"string"},"binary":{"type":"string"},"model":{"type":"string"},"permission_mode":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_wait","description":"Wait up to a timeout for a delegated task result; re-wait with the same handle if still running.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":0},"state_dir":{"type":"string"}}}},
         {"name":"sub_recover","description":"Start a new attempt that resumes an orphaned task's recorded harness session.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_cancel","description":"Cancel one task's latest attempt and return the delivery disposition immediately; an orphaned attempt is ended directly and its recorded child terminated when verified.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
         {"name":"sub_list","description":"List delegated tasks by reading the state directory without contacting supervisors or harnesses.","inputSchema":{"type":"object","properties":{"state_dir":{"type":"string"}}}},
         {"name":"sub_inspect","description":"Inspect one task's status, normalized events, cost, and tokens by reading the state directory.","inputSchema":{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"},"state_dir":{"type":"string"}}}},
-        {"name":"sub_bridge_install","description":"Install or verify a harness's ACP transport. Cursor uses native ACP and reports that no bridge is required.","inputSchema":{"type":"object","required":["harness"],"properties":{"harness":{"type":"string","enum":["claude","codex","cursor"]},"state_dir":{"type":"string"}}}}
+        {"name":"sub_bridge_install","description":"Install or verify a harness's ACP transport. cursor-agent uses native ACP and reports that no bridge is required.","inputSchema":{"type":"object","required":["harness"],"properties":{"harness":{"type":"string","enum":["claude","codex","cursor-agent"]},"state_dir":{"type":"string"}}}}
     ]})
 }
 
@@ -352,10 +352,10 @@ mod tests {
                 "sub_bridge_install"
             ]
         );
-        assert_eq!(parse_harness("cursor"), Ok(Harness::CursorAgent));
+        assert_eq!(parse_harness("cursor-agent"), Ok(Harness::CursorAgent));
         let config = SubConfig {
             harnesses: sub_sdk::config::HarnessConfigs {
-                cursor: Some(sub_sdk::config::HarnessConfig {
+                cursor_agent: Some(sub_sdk::config::HarnessConfig {
                     binary: PathBuf::from("/bin/cursor-agent"),
                     model: None,
                     permission_mode: Some("agent".to_owned()),
@@ -375,9 +375,11 @@ mod tests {
             prepared.resume_mechanism,
             sub_sdk::delegation::ResumeMechanism::Load
         );
-        let installed =
-            install_bridge_tool(&json!({"harness":"cursor","state_dir":"/unused"}), &config)
-                .unwrap_or_else(|error| panic!("cursor bridge: {error}"));
+        let installed = install_bridge_tool(
+            &json!({"harness":"cursor-agent","state_dir":"/unused"}),
+            &config,
+        )
+        .unwrap_or_else(|error| panic!("cursor bridge: {error}"));
         assert_eq!(installed["required"], false);
         assert_eq!(installed["bridge_binary"], "/bin/cursor-agent");
     }
@@ -398,10 +400,16 @@ mod tests {
         assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(7));
         let launch_harnesses =
             &listed["result"]["tools"][0]["inputSchema"]["properties"]["harness"]["enum"];
-        assert_eq!(launch_harnesses, &json!(["claude", "codex", "cursor"]));
+        assert_eq!(
+            launch_harnesses,
+            &json!(["claude", "codex", "cursor-agent"])
+        );
         let bridge_harnesses =
             &listed["result"]["tools"][6]["inputSchema"]["properties"]["harness"]["enum"];
-        assert_eq!(bridge_harnesses, &json!(["claude", "codex", "cursor"]));
+        assert_eq!(
+            bridge_harnesses,
+            &json!(["claude", "codex", "cursor-agent"])
+        );
         let missing = respond(json!({"jsonrpc":"2.0","id":4,"method":"unknown"}))
             .await
             .unwrap_or_else(|| panic!("response"));

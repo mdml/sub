@@ -8,7 +8,7 @@ fn wait_reports_orphaned_and_recover_starts_the_next_attempt() {
     prepare_orphaned_task(root.path(), handle);
     let binary = env!("CARGO_BIN_EXE_sub");
 
-    let wait = Command::new(binary)
+    let wait = sub_command(binary, root.path())
         .args(["wait", handle, "--timeout-seconds", "0", "--state-dir"])
         .arg(root.path())
         .output()
@@ -19,7 +19,7 @@ fn wait_reports_orphaned_and_recover_starts_the_next_attempt() {
     assert_eq!(wait["state"], "orphaned");
     assert_eq!(wait["status"], "orphaned");
 
-    let recover = Command::new(binary)
+    let recover = sub_command(binary, root.path())
         .args(["recover", handle, "--state-dir"])
         .arg(root.path())
         .output()
@@ -34,7 +34,7 @@ fn wait_reports_orphaned_and_recover_starts_the_next_attempt() {
     assert_eq!(recovered["handle"]["id"], handle);
     assert_eq!(recovered["attempt"], 2);
 
-    let complete = Command::new(binary)
+    let complete = sub_command(binary, root.path())
         .args(["wait", handle, "--timeout-seconds", "3", "--state-dir"])
         .arg(root.path())
         .output()
@@ -50,7 +50,7 @@ fn wait_reports_orphaned_and_recover_starts_the_next_attempt() {
             .is_some_and(|summary| !summary.is_empty())
     );
 
-    let cancel = Command::new(binary)
+    let cancel = sub_command(binary, root.path())
         .args(["cancel", handle, "--state-dir"])
         .arg(root.path())
         .output()
