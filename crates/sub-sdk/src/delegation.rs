@@ -24,7 +24,7 @@ pub enum Harness {
     /// `OpenAI Codex`.
     Codex,
     /// Cursor Agent.
-    #[serde(rename = "cursor", alias = "cursor_agent")]
+    #[serde(rename = "cursor-agent", alias = "cursor", alias = "cursor_agent")]
     CursorAgent,
 }
 

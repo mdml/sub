@@ -77,7 +77,7 @@ fn parse_harness(value: &str) -> Result<Harness, String> {
     match value {
         "claude" => Ok(Harness::Claude),
         "codex" => Ok(Harness::Codex),
-        "cursor" => Ok(Harness::CursorAgent),
+        "cursor-agent" => Ok(Harness::CursorAgent),
         _ => Err(format!("unsupported harness: {value}")),
     }
 }
@@ -129,7 +129,7 @@ const fn harness_name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "claude",
         Harness::Codex => "codex",
-        Harness::CursorAgent => "cursor",
+        Harness::CursorAgent => "cursor-agent",
     }
 }
 
@@ -142,7 +142,9 @@ fn onboarding_harnesses(args: &Arguments) -> Result<Vec<Harness>, String> {
         }
     }
     if harnesses.is_empty() {
-        return Err("usage: sub onboard <claude|codex|cursor>... [--state-dir PATH]".to_owned());
+        return Err(
+            "usage: sub onboard <claude|codex|cursor-agent>... [--state-dir PATH]".to_owned(),
+        );
     }
     Ok(harnesses)
 }
@@ -236,10 +238,10 @@ fn bridge_install_output(harness: &str, root: &Path, config: &SubConfig) -> Resu
         "codex" => sub_adapter_codex::install_bridge(root)
             .map(|path| path.display().to_string())
             .map_err(|error| error.to_string()),
-        "cursor" => {
+        "cursor-agent" => {
             let configured = config
                 .harness(Harness::CursorAgent)
-                .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?;
+                .ok_or_else(|| "cursor-agent is not configured in sub.toml".to_owned())?;
             Ok(sub_adapter_cursor::install_bridge(&configured.binary)
                 .message
                 .to_owned())
@@ -276,7 +278,7 @@ async fn run() -> Result<(), String> {
 
 fn bridge_install_command(args: &Arguments) -> Result<(), String> {
     let harness = args.get(2).ok_or_else(|| {
-        "usage: sub bridge install <claude|codex|cursor> [--state-dir PATH]".to_owned()
+        "usage: sub bridge install <claude|codex|cursor-agent> [--state-dir PATH]".to_owned()
     })?;
     let loaded = config()?;
     let root = state_dir(args, &loaded.config)?;
@@ -381,13 +383,13 @@ mod tests {
     fn parses_supported_harnesses() {
         assert_eq!(parse_harness("claude"), Ok(Harness::Claude));
         assert_eq!(parse_harness("codex"), Ok(Harness::Codex));
-        assert_eq!(parse_harness("cursor"), Ok(Harness::CursorAgent));
+        assert_eq!(parse_harness("cursor-agent"), Ok(Harness::CursorAgent));
         let config: SubConfig = toml::from_str(
-            "[harnesses.cursor]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
+            "[harnesses.cursor-agent]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
         )
         .unwrap_or_else(|error| panic!("config: {error}"));
         assert!(
-            bridge_install_output("cursor", Path::new("/unused"), &config)
+            bridge_install_output("cursor-agent", Path::new("/unused"), &config)
                 .is_ok_and(|message| message.contains("no bridge"))
         );
         let prepared = adapter(
@@ -461,7 +463,7 @@ mod tests {
                 .is_some_and(|error| error.contains("--permission-mode is required"))
         );
         assert_eq!(harness_name(Harness::Claude), "claude");
-        assert_eq!(harness_name(Harness::CursorAgent), "cursor");
+        assert_eq!(harness_name(Harness::CursorAgent), "cursor-agent");
         assert_eq!(
             mcp_binary()
                 .unwrap_or_else(|error| panic!("mcp binary: {error}"))

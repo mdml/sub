@@ -2,6 +2,13 @@
 
 use std::process::Command;
 
+/// Run `sub` with configuration discovery pinned to an absent file under `root`, so tests never read the developer's real `sub.toml`.
+fn sub_command(binary: impl AsRef<std::ffi::OsStr>, root: &std::path::Path) -> Command {
+    let mut command = Command::new(binary);
+    command.env("SUB_CONFIG", root.join("absent-sub.toml"));
+    command
+}
+
 fn existing_binary() -> std::path::PathBuf {
     std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"))
 }

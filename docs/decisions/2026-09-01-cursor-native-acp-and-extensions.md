@@ -1,6 +1,6 @@
 # Cursor native ACP transport and extension handling
 
-Date: 2026-09-01. Status: adopted.
+Date: 2026-09-01. Status: adopted; superseded in part on 2026-09-08 by [Harness identifiers are binary names](2026-09-08-harness-identifiers.md), which renames the public harness identifier `cursor` to `cursor-agent`. The transport, extension, usage, session-artifact, and onboarding decisions below remain in force.
 
 ## Decision
 

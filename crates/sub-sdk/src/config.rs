@@ -29,8 +29,9 @@ pub struct HarnessConfigs {
     pub claude: Option<HarnessConfig>,
     /// Codex configuration.
     pub codex: Option<HarnessConfig>,
-    /// Cursor Agent configuration.
-    pub cursor: Option<HarnessConfig>,
+    /// Cursor Agent configuration, keyed `cursor-agent` in `sub.toml`.
+    #[serde(rename = "cursor-agent")]
+    pub cursor_agent: Option<HarnessConfig>,
 }
 
 /// The complete beta-minimum `sub.toml` shape.
@@ -50,7 +51,7 @@ impl SubConfig {
         match harness {
             Harness::Claude => self.harnesses.claude.as_ref(),
             Harness::Codex => self.harnesses.codex.as_ref(),
-            Harness::CursorAgent => self.harnesses.cursor.as_ref(),
+            Harness::CursorAgent => self.harnesses.cursor_agent.as_ref(),
         }
     }
 }
@@ -198,7 +199,7 @@ mod tests {
         let path = root.path().join("sub.toml");
         fs::write(
             &path,
-            "state_dir = '/tmp/state'\n[harnesses.codex]\nbinary = '/bin/codex'\nmodel = 'gpt-test'\npermission_mode = 'agent'\n[harnesses.cursor]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
+            "state_dir = '/tmp/state'\n[harnesses.codex]\nbinary = '/bin/codex'\nmodel = 'gpt-test'\npermission_mode = 'agent'\n[harnesses.cursor-agent]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
         )
         .unwrap_or_else(|error| panic!("write: {error}"));
         let loaded = load_from(Some(path.as_os_str()), None, None)
