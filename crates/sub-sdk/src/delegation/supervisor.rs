@@ -5,7 +5,9 @@ use std::process::Command;
 
 use crate::acp::{AcpClient, AcpClientConfig, PromptOptions, SessionStart, TurnUsage};
 
-use super::events::{append_event, cancellation_options, session_observer, update_observer};
+use super::events::{
+    append_event, cancellation_options, process_observer, session_observer, update_observer,
+};
 use super::liveness::process_start_time;
 use super::result::{base_artifacts, derive_task_result};
 use super::state::{TaskPaths, read_json, read_task_usage, validate_handle, write_json};
@@ -90,6 +92,7 @@ fn start_attempt(
         supervisor_pid: Some(std::process::id()),
         supervisor_start_time: process_start_time(std::process::id()),
         harness_session_id: None,
+        harness_child: None,
         usage: UsageTotals::default(),
     };
     write_json(&paths.state, &running)?;
@@ -132,11 +135,13 @@ async fn execute_prompt(
 ) -> Result<(crate::acp::SessionHandle, crate::acp::PromptResult), crate::acp::AcpError> {
     let is_resume = request.resume_session_id.is_some();
     let observer = update_observer(paths, handle, running.clone());
-    let session_observer = session_observer(paths, handle, running, is_resume);
+    let session_observer = session_observer(paths, handle, running.clone(), is_resume);
+    let process_observer = process_observer(paths, running);
     let prompt = prompt_text(&request, is_resume);
     let options = PromptOptions {
         update_observer: Some(observer),
         session_observer: Some(session_observer),
+        process_observer: Some(process_observer),
         ..prompt_options(&request, paths)
     };
     AcpClient::new(request.adapter.bridge, AcpClientConfig::default())
@@ -250,6 +255,7 @@ fn finish_attempt(
                 .harness_session_id
                 .clone()
                 .or(current.harness_session_id),
+            harness_child: current.harness_child,
             usage,
         },
     )?;

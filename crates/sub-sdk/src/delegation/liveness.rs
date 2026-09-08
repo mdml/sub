@@ -29,7 +29,36 @@ pub(super) fn supervisor_is_alive(attempt: &ExecutionAttempt) -> bool {
     let Some(expected) = attempt.supervisor_start_time else {
         return false;
     };
-    process_identity(pid).is_some_and(|identity| identity.alive && identity.start_time == expected)
+    process_check(pid, expected) == ProcessCheck::Live
+}
+
+/// What direct process evidence says about a recorded PID and start token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProcessCheck {
+    /// A live process with this PID has the recorded start token.
+    Live,
+    /// No live process has this PID.
+    Gone,
+    /// A live process has this PID but a different start token.
+    Mismatch,
+}
+
+pub(super) fn process_check(pid: u32, expected_start_time: u64) -> ProcessCheck {
+    match process_identity(pid) {
+        Some(identity) if identity.alive && identity.start_time == expected_start_time => {
+            ProcessCheck::Live
+        }
+        Some(identity) if identity.alive => ProcessCheck::Mismatch,
+        _ => ProcessCheck::Gone,
+    }
+}
+
+/// Process group of a live process, when the operating system reports one.
+#[allow(unsafe_code)]
+pub(super) fn process_group(pid: u32) -> Option<u32> {
+    let pid = i32::try_from(pid).ok()?;
+    let group = unsafe { libc::getpgid(pid) };
+    u32::try_from(group).ok()
 }
 
 #[cfg(target_os = "linux")]

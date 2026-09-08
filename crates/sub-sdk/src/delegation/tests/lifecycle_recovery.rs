@@ -14,6 +14,7 @@ fn recover_creates_a_sequential_attempt_for_the_recorded_session() {
         supervisor_pid: Some(u32::MAX),
         supervisor_start_time: Some(1),
         harness_session_id: Some("fixture-session".to_owned()),
+        harness_child: None,
         usage: UsageTotals::default(),
     };
     write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));
@@ -67,6 +68,7 @@ fn recover_rejects_cancelled_task_and_records_why() {
         supervisor_pid: None,
         supervisor_start_time: None,
         harness_session_id: Some("fixture-session".to_owned()),
+        harness_child: None,
         usage: UsageTotals::default(),
     };
     write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));

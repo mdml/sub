@@ -4,14 +4,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::acp::{CancellationOptions, SessionObserver, StreamUpdateKind, UpdateObserver};
+use crate::acp::{
+    CancellationOptions, ProcessObserver, SessionObserver, StreamUpdateKind, UpdateObserver,
+};
 
 use super::result::looks_like_subagent;
 use super::state::{TaskPaths, read_json, read_task_usage, write_json};
 use super::supervisor::CANCEL_GRACE_PERIOD;
 use super::{
-    ActivityKind, DelegationError, ExecutionAttempt, TaskEvent, TaskEventKind, TaskHandle,
-    UsageCost,
+    ActivityKind, DelegationError, ExecutionAttempt, HarnessChild, TaskEvent, TaskEventKind,
+    TaskHandle, UsageCost,
 };
 
 pub(super) fn cancellation_options(paths: &TaskPaths) -> CancellationOptions {
@@ -19,6 +21,25 @@ pub(super) fn cancellation_options(paths: &TaskPaths) -> CancellationOptions {
         request_path: paths.cancel_request.clone(),
         grace_period: CANCEL_GRACE_PERIOD,
     }
+}
+
+/// Record the spawned harness child's identity so a later orphaned cancel can verify it.
+pub(super) fn process_observer(paths: &TaskPaths, running: ExecutionAttempt) -> ProcessObserver {
+    let state_path = paths.state.clone();
+    Arc::new(move |pid| {
+        let Some(child) = HarnessChild::observe(pid) else {
+            return;
+        };
+        let mut attempt = read_json(&state_path).unwrap_or_else(|_| running.clone());
+        attempt.harness_child = Some(child);
+        let _ = write_json(&state_path, &attempt);
+    })
+}
+
+fn recorded_child(state_path: &Path) -> Option<HarnessChild> {
+    read_json::<ExecutionAttempt>(state_path)
+        .ok()
+        .and_then(|current| current.harness_child)
 }
 
 pub(super) fn session_observer(
@@ -33,6 +54,7 @@ pub(super) fn session_observer(
     Arc::new(move |session_id| {
         let mut attempt = running.clone();
         attempt.harness_session_id = Some(session_id.to_owned());
+        attempt.harness_child = recorded_child(&state_path);
         let _ = write_json(&state_path, &attempt);
         if resumed {
             let _ = append_event(
@@ -64,6 +86,7 @@ pub(super) fn update_observer(
             if let Some(cost) = &update.cost {
                 if let Ok(current) = read_json::<ExecutionAttempt>(&state.state) {
                     state.attempt.harness_session_id = current.harness_session_id;
+                    state.attempt.harness_child = current.harness_child;
                 }
                 state.attempt.usage.cost = Some(UsageCost {
                     amount: cost.amount,

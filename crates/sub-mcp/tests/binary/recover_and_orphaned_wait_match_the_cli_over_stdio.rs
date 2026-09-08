@@ -22,16 +22,6 @@ fn recover_and_orphaned_wait_match_the_cli_over_stdio() {
     );
     assert_eq!(waited["result"]["structuredContent"]["state"], "orphaned");
 
-    let cancelled = rpc_call(
-        &mut stdin,
-        &mut stdout,
-        serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sub_cancel","arguments":{"handle":handle,"state_dir":state}}}),
-    );
-    assert_eq!(
-        cancelled["result"]["structuredContent"]["delivery"],
-        "attempt_orphaned"
-    );
-
     let recovered = rpc_call(
         &mut stdin,
         &mut stdout,
@@ -52,6 +42,16 @@ fn recover_and_orphaned_wait_match_the_cli_over_stdio() {
     assert_eq!(
         complete["result"]["structuredContent"]["result"]["status"],
         "failed"
+    );
+
+    let cancelled = rpc_call(
+        &mut stdin,
+        &mut stdout,
+        serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"sub_cancel","arguments":{"handle":handle,"state_dir":state}}}),
+    );
+    assert_eq!(
+        cancelled["result"]["structuredContent"]["delivery"],
+        "already_finished"
     );
     drop(stdin);
     assert!(

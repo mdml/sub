@@ -47,7 +47,7 @@ target/debug/sub launch --harness codex --cwd "$PWD" --prompt "Review the curren
 target/debug/sub wait tsk_REPLACE_WITH_HANDLE --timeout-seconds 30
 ```
 
-If wait returns `{"state":"running",...}`, call it again with the same handle. If inspection reports `orphaned`, explicit recover creates the next attempt and resumes the recorded harness session. Cancel returns its delivery disposition immediately; observe or wait for the terminal result.
+If wait returns `{"state":"running",...}`, call it again with the same handle. If inspection reports `orphaned`, explicit recover creates the next attempt and resumes the recorded harness session, or cancel ends the task there. Cancel returns its delivery disposition immediately; observe or wait for the terminal result.
 
 ```sh
 target/debug/sub recover tsk_REPLACE_WITH_HANDLE

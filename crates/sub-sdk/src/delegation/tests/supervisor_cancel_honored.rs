@@ -24,6 +24,7 @@ async fn supervisor_delivers_cancel_and_preserves_partial_result() {
                 supervisor_pid: Some(std::process::id()),
                 supervisor_start_time: process_start_time(std::process::id()),
                 harness_session_id: None,
+                harness_child: None,
                 usage: UsageTotals::default(),
             },
         },

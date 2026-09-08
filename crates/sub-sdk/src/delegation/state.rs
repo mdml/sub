@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 
 use super::events::{append_event, read_events};
 use super::liveness::{effective_status, process_start_time};
+use super::orphan::cancel_orphaned_attempt;
 use super::supervisor::supervisor_command;
 use super::{
     AdapterLaunch, AttemptObservation, CancelDelivery, CancelOutcome, DelegatedTask,
@@ -42,7 +43,11 @@ impl Delegator {
         Ok(handle)
     }
 
-    /// Request cancellation of the latest attempt and return without waiting for completion.
+    /// Cancel the latest attempt and return without waiting for a live supervisor to finish.
+    ///
+    /// A live attempt receives a durable request its supervisor acts on. An orphaned attempt has
+    /// no supervisor, so the kernel ends its recorded harness child where that is safe, publishes
+    /// the cancelled result itself, and rejects any later recovery.
     ///
     /// # Errors
     ///
@@ -57,7 +62,10 @@ impl Delegator {
         let paths = TaskPaths::for_attempt(&self.state_dir, handle, attempt);
         let state: ExecutionAttempt = read_json(&paths.state)?;
         let delivery = match effective_status(&state) {
-            TaskStatus::Orphaned => CancelDelivery::AttemptOrphaned,
+            TaskStatus::Orphaned => {
+                cancel_orphaned_attempt(&self.state_dir, handle, &paths, state)?;
+                CancelDelivery::AttemptOrphaned
+            }
             TaskStatus::Succeeded | TaskStatus::Failed | TaskStatus::Cancelled => {
                 CancelDelivery::AlreadyFinished
             }
@@ -233,6 +241,7 @@ pub(super) fn queued_attempt(number: u32, harness_session_id: Option<String>) ->
         supervisor_pid: None,
         supervisor_start_time: None,
         harness_session_id,
+        harness_child: None,
         usage: UsageTotals::default(),
     }
 }
