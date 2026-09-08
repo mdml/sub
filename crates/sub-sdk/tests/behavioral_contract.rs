@@ -31,6 +31,8 @@ async fn prompt(
         .prompt_turn(cwd.path(), PROMPT, options)
         .await
 }
+#[path = "behavioral_contract/cancel_orphaned_terminates_live_child.rs"]
+mod cancel_orphaned_terminates_live_child;
 #[path = "behavioral_contract/cancellation_honored.rs"]
 mod cancellation_honored;
 #[path = "behavioral_contract/cancellation_ignored.rs"]

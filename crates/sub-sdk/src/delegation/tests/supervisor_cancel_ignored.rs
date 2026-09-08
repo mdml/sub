@@ -22,6 +22,7 @@ async fn supervisor_bounds_an_ignored_cancel() {
                 supervisor_pid: Some(std::process::id()),
                 supervisor_start_time: process_start_time(std::process::id()),
                 harness_session_id: None,
+                harness_child: None,
                 usage: UsageTotals::default(),
             },
         },
@@ -45,6 +46,13 @@ async fn supervisor_bounds_an_ignored_cancel() {
         read_json(&paths.result).unwrap_or_else(|error| panic!("result: {error}"));
     assert_eq!(result.status, TaskStatus::Cancelled);
     assert_process_is_dead(child_identity);
+    let state: ExecutionAttempt =
+        read_json(&paths.state).unwrap_or_else(|error| panic!("state: {error}"));
+    let recorded = state
+        .harness_child
+        .unwrap_or_else(|| panic!("supervisor must record the harness child identity"));
+    assert_eq!((recorded.pid, recorded.start_time), child_identity);
+    assert_eq!(recorded.process_group, Some(recorded.pid));
     let events = read_events(&paths.events).unwrap_or_else(|error| panic!("events: {error}"));
     assert!(events.iter().any(|event| matches!(
         event.kind,
@@ -86,6 +94,7 @@ fn assert_process_is_dead((pid, start_time): (u32, u64)) {
         supervisor_pid: Some(pid),
         supervisor_start_time: Some(start_time),
         harness_session_id: None,
+        harness_child: None,
         usage: UsageTotals::default(),
     }));
 }

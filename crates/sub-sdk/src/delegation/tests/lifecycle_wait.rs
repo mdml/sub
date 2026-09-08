@@ -16,6 +16,7 @@ async fn repeated_wait_reads_same_result() {
             supervisor_pid: None,
             supervisor_start_time: None,
             harness_session_id: Some("session".to_owned()),
+            harness_child: None,
             usage: UsageTotals::default(),
         },
     )
@@ -59,6 +60,7 @@ async fn wait_returns_running_after_timeout() {
             supervisor_pid: Some(std::process::id()),
             supervisor_start_time: process_start_time(std::process::id()),
             harness_session_id: None,
+            harness_child: None,
             usage: UsageTotals::default(),
         },
     )

@@ -61,6 +61,8 @@ pub struct PromptOptions {
     pub update_observer: Option<UpdateObserver>,
     /// Callback notified as soon as the harness session is open.
     pub session_observer: Option<SessionObserver>,
+    /// Callback notified with the agent child's PID as soon as it is spawned.
+    pub process_observer: Option<ProcessObserver>,
 }
 
 impl fmt::Debug for PromptOptions {
@@ -76,6 +78,7 @@ impl fmt::Debug for PromptOptions {
             .field("session_start", &self.session_start)
             .field("update_observer", &self.update_observer.is_some())
             .field("session_observer", &self.session_observer.is_some())
+            .field("process_observer", &self.process_observer.is_some())
             .finish()
     }
 }
@@ -94,6 +97,9 @@ pub type UpdateObserver = Arc<dyn Fn(StreamUpdate) + Send + Sync>;
 
 /// Thread-safe callback invoked as soon as the harness session is open.
 pub type SessionObserver = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Thread-safe callback invoked with the spawned agent process identifier.
+pub type ProcessObserver = Arc<dyn Fn(u32) + Send + Sync>;
 
 /// Configuration for driving one ACP agent process.
 #[derive(Debug, Clone)]
@@ -252,6 +258,9 @@ async fn run_prompt_turn(
     let client_name = client.config.client_name.clone();
     let agent = AcpAgent::new(client.launch.clone().into_acp_config());
     let (mut process, transport) = AgentProcess::spawn(&agent)?;
+    if let Some(observer) = &turn.options.process_observer {
+        observer(process.id());
+    }
     let (result_tx, result_rx) = tokio::sync::oneshot::channel();
     let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel();
     let loading_replay = Arc::new(AtomicBool::new(matches!(

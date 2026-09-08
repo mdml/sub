@@ -16,6 +16,7 @@ async fn wait_returns_orphaned_without_timing_out() {
             supervisor_pid: Some(u32::MAX),
             supervisor_start_time: Some(1),
             harness_session_id: Some("fixture-session".to_owned()),
+            harness_child: None,
             usage: UsageTotals::default(),
         },
     )
@@ -47,6 +48,7 @@ fn inspect_reports_dead_running_supervisor_as_orphaned() {
         supervisor_pid: Some(u32::MAX),
         supervisor_start_time: Some(1),
         harness_session_id: Some("fixture-session".to_owned()),
+        harness_child: None,
         usage: UsageTotals::default(),
     };
     write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));

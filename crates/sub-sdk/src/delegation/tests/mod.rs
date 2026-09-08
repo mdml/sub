@@ -86,6 +86,7 @@ fn prepare_resume_attempt(
 }
 
 mod lifecycle_cancel_orphan;
+mod lifecycle_cancel_orphan_child;
 mod lifecycle_cancel_terminal;
 mod lifecycle_list;
 mod lifecycle_orphan;

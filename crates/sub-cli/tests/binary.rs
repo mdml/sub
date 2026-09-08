@@ -72,6 +72,27 @@ fn prepare_orphaned_task(root: &std::path::Path, handle: &str) {
     )
     .unwrap_or_else(|error| panic!("request: {error}"));
 }
+fn record_harness_child(root: &std::path::Path, handle: &str, pid: u32) {
+    let state_path = root
+        .join("tasks")
+        .join(handle)
+        .join("attempts/1/state.json");
+    let mut state: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&state_path).unwrap_or_else(|error| panic!("read state: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("state json: {error}"));
+    let child =
+        sub_sdk::delegation::HarnessChild::observe(pid).unwrap_or_else(|| panic!("child identity"));
+    state["harness_child"] =
+        serde_json::to_value(child).unwrap_or_else(|error| panic!("child json: {error}"));
+    std::fs::write(
+        &state_path,
+        serde_json::to_vec(&state).unwrap_or_else(|error| panic!("state json: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("state: {error}"));
+}
+#[path = "binary/cancel_ends_an_orphaned_task_and_its_child.rs"]
+mod cancel_ends_an_orphaned_task_and_its_child;
 #[path = "binary/command_errors_are_actionable.rs"]
 mod command_errors_are_actionable;
 #[path = "binary/config_supplies_launch_values_and_explicit_arguments_win.rs"]

@@ -32,6 +32,11 @@ impl AgentProcess {
         ))
     }
 
+    /// Operating-system identifier of the direct agent child.
+    pub(super) fn id(&self) -> u32 {
+        self.child.as_ref().map_or(0, Child::id)
+    }
+
     pub(super) async fn shutdown(&mut self, force: bool) -> Result<(), AcpError> {
         if force {
             self.terminate_group()?;
