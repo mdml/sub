@@ -35,9 +35,9 @@ The base must resolve to a nightly tag on `main`. `allow_untagged_base` is an ex
 
 ## Initial setup and rulesets
 
-Before the first release, create `mdml/homebrew-tap` and configure `HOMEBREW_TAP_TOKEN`. The owner must also create the release deploy key and the `stable` branch and release-tag rulesets with the commands in the release-channel decision record. Apply the rulesets before the first confirmed promotion; do not create `stable` manually. The workflow's deploy-key bypass then creates the protected branch.
+The `mdml/homebrew-tap` repository, `HOMEBREW_TAP_TOKEN`, release deploy key (`RELEASE_DEPLOY_KEY`), and `stable` branch and release-tag rulesets were created on 2026-09-02. The rulesets grant the workflow's deploy key the bypass needed to write protected release refs; the `stable` branch is created by the first confirmed promotion.
 
-No `main` ruleset change is required: the existing rule already requires the `verify-full` context, allows only merge-commit PRs, and blocks deletion and non-fast-forward updates.
+The `main` ruleset requires the `verify-full` context, allows only merge-commit PRs, and blocks deletion and non-fast-forward updates.
 
 ## Distribution
 

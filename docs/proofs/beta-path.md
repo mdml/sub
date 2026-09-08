@@ -22,7 +22,7 @@ From a fresh process, observe `running`, task-to-attempt linkage, a non-null har
 "$SUB_BIN" inspect "$HANDLE" --state-dir "$STATE_DIR"
 ```
 
-Resolve the attempt-1 supervisor PID from implementation-private state, verify that its command line is `$SUB_BIN __supervise "$HANDLE" 1`, and kill only that verified `sub` process. Observe `orphaned`, then recover:
+Resolve the attempt-1 supervisor PID from implementation-private state, verify that its command line starts with `$SUB_BIN __supervise "$HANDLE" 1` (or `sub-mcp __supervise "$HANDLE" 1` for an MCP-launched task), and kill only that verified supervisor process. Observe `orphaned`, then recover:
 
 ```sh
 kill -9 "$SUPERVISOR_PID"

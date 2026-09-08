@@ -1,6 +1,6 @@
 # Recovery attempts and bridge session resume
 
-Date: 2026-09-01. Status: adopted.
+Date: 2026-09-01. Status: superseded in part on 2026-09-01 by [Cursor native ACP transport and extension handling](2026-09-01-cursor-native-acp-and-extensions.md); the Cursor adapter implements `ResumeMechanism::Load`; the recovery mechanics remain adopted.
 
 ## Decision
 

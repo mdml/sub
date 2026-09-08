@@ -50,11 +50,12 @@ The base ref defaults to `origin/staging`. Override it with `scripts/verify.sh -
 | `promote-stable.yml` | Manual preview and confirmed dispatch | Whole-tree full gate for the assembled stable pointer before any release ref is pushed. |
 | `release.yml` | Pull requests for release planning; explicit stable dispatch for publishing | Generated cargo-dist release plan/build or stable publication; see [`release.md`](release.md). |
 
-The `verify` and `verify-full` job names are the required-check contexts used by the protected-branch rulesets. `macOS test suite (fake harness)` is a required-check candidate for the `staging` ruleset. Dependabot proposes Cargo and GitHub Actions updates weekly into `staging`. On-machine nightlies are documented under [`nightlies/`](nightlies/README.md).
+The `verify` and `verify-full` job names are the required-check contexts used by the protected-branch rulesets. `macOS test suite (fake harness)` is a required check for the `staging` ruleset. Dependabot proposes Cargo and GitHub Actions updates weekly into `staging`. On-machine nightlies are documented under [`nightlies/`](nightlies/README.md).
 
 ## Secrets
 
 | Secret | Used by | Purpose |
 |:--|:--|:--|
-| `CS_ACCESS_TOKEN` | `per-commit.yml`, `full.yml` | Mandatory CodeScene authentication for push and PR gates. |
+| `CS_ACCESS_TOKEN` | `per-commit.yml`, `full.yml`, `nightly.yml`, `promote-stable.yml` | Mandatory CodeScene authentication for push, PR, nightly, and stable-promotion gates. |
+| `RELEASE_DEPLOY_KEY` | `nightly.yml`, `promote-stable.yml` | SSH write access for workflow-owned release tags, the protected `stable` branch, and release reconciliation branches. |
 | `HOMEBREW_TAP_TOKEN` | `release.yml` | Push access to the Homebrew tap repository for releases. |

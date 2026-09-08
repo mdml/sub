@@ -79,8 +79,8 @@ cargo build --workspace
 ## Verify
 
 ```sh
-scripts/verify.sh          # per-commit gate: format, lint, build, docs, tests with coverage
-scripts/verify.sh --full   # full gate: adds dependency audit and CodeScene (needs CS_ACCESS_TOKEN)
+scripts/verify.sh          # per-commit gate: format, lint, build, docs, tests with coverage, changed-file CodeScene (requires CS_ACCESS_TOKEN)
+scripts/verify.sh --full   # full gate: adds dependency audit, uses PR-base-relative CodeScene (requires CS_ACCESS_TOKEN)
 ```
 
 `just verify` and `just verify-full` are aliases. See [`docs/verification.md`](docs/verification.md).
