@@ -7,9 +7,15 @@ use sub_sdk::delegation::{
 };
 
 use super::*;
+use crate::common::fake_binary::fake_binary;
 
 /// A stand-in supervisor for attempt 2: recover must dispose of the orphan before it spawns.
-const SUPERVISOR_STAND_IN: &str = "/bin/true";
+///
+/// The fake-harness binary stands in because `/bin/true` cannot be spawned as a detached
+/// session on the macOS CI runner.
+fn supervisor_stand_in() -> std::path::PathBuf {
+    fake_binary()
+}
 
 /// Recover ends the orphaned attempt's live child, so the recovered task has one live child.
 ///
@@ -29,7 +35,7 @@ async fn recover_ends_the_live_orphaned_child_before_resuming() {
         HarnessChild::observe(child.id()).unwrap_or_else(|| panic!("harness child identity"));
     write_orphaned_state(root.path(), &handle.id, &harness, Some(identity));
 
-    let recovered = Delegator::new(root.path(), SUPERVISOR_STAND_IN)
+    let recovered = Delegator::new(root.path(), supervisor_stand_in())
         .recover(&handle)
         .unwrap_or_else(|error| panic!("recover: {error}"));
 
@@ -62,7 +68,7 @@ async fn recover_records_an_orphaned_child_that_is_already_gone() {
     };
     write_orphaned_state(root.path(), &handle.id, &harness, Some(identity));
 
-    let recovered = Delegator::new(root.path(), SUPERVISOR_STAND_IN)
+    let recovered = Delegator::new(root.path(), supervisor_stand_in())
         .recover(&handle)
         .unwrap_or_else(|error| panic!("recover: {error}"));
 
@@ -92,7 +98,7 @@ fn spawn_harness(harness: &ContractHarness) -> std::process::Child {
 
 /// What recover recorded about attempt 1's child.
 fn disposition(root: &TempDir, handle: &TaskHandle) -> OrphanedChildDisposition {
-    let inspection = Delegator::new(root.path(), SUPERVISOR_STAND_IN)
+    let inspection = Delegator::new(root.path(), supervisor_stand_in())
         .inspect(handle)
         .unwrap_or_else(|error| panic!("inspect: {error}"));
     inspection
