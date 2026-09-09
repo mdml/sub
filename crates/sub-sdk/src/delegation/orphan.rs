@@ -1,8 +1,9 @@
-//! Terminal cancellation of an attempt whose supervisor is gone.
+//! Disposal of the harness child of an attempt whose supervisor is gone.
 //!
-//! No supervisor can deliver ACP cancellation for an orphaned attempt, so the kernel ends the
-//! attempt itself: it deals with the recorded harness child, publishes a cancelled result, and
-//! records the same terminal events a live cancel would, so recovery is rejected afterwards.
+//! No supervisor can deliver ACP cancellation for an orphaned attempt, so the kernel deals with
+//! the recorded child itself. Terminal cancel then publishes a cancelled result and records the
+//! same terminal events a live cancel would, so recovery is rejected afterwards; recover reuses
+//! only the disposal, so a recovered task has one live child.
 
 use std::io;
 use std::path::Path;

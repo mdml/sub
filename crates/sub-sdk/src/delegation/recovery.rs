@@ -2,10 +2,12 @@ use std::fs;
 
 use super::events::append_event;
 use super::liveness::effective_status;
+use super::orphan::dispose_of_child;
 use super::state::{
     SupervisorSpawner, TaskPaths, latest_attempt_number, queued_attempt, read_json,
     validate_handle, write_json,
 };
+use super::supervisor::CANCEL_GRACE_PERIOD;
 use super::{
     DelegationError, Delegator, ExecutionAttempt, RecoverOutcome, RecoveryRejectionReason,
     SupervisorRequest, TaskEventKind, TaskHandle, TaskStatus,
@@ -28,12 +30,7 @@ impl Delegator {
         let prior_paths = TaskPaths::for_attempt(&self.state_dir, handle, prior_number);
         let prior: ExecutionAttempt = read_json(&prior_paths.state)?;
         require_orphaned(&prior_paths, handle, prior_number, &prior)?;
-        append_event(
-            &prior_paths.events,
-            handle,
-            prior_number,
-            TaskEventKind::AttemptOrphaned,
-        )?;
+        end_orphaned_child(&prior_paths, handle, prior_number, &prior)?;
 
         let number = prior_number + 1;
         let paths = TaskPaths::for_attempt(&self.state_dir, handle, number);
@@ -68,6 +65,31 @@ fn require_orphaned(
         return Err(DelegationError::NotOrphaned(handle.id.clone()));
     }
     Ok(())
+}
+
+/// Leave one live child behind: end the orphaned attempt's recorded child before resuming.
+///
+/// The disposition is recorded on the orphaned attempt whatever it is, and never blocks the
+/// resume: a child that is already gone or whose identity cannot be verified is left alone.
+fn end_orphaned_child(
+    paths: &TaskPaths,
+    handle: &TaskHandle,
+    number: u32,
+    prior: &ExecutionAttempt,
+) -> Result<(), DelegationError> {
+    append_event(
+        &paths.events,
+        handle,
+        number,
+        TaskEventKind::AttemptOrphaned,
+    )?;
+    let disposition = dispose_of_child(prior.harness_child.as_ref(), CANCEL_GRACE_PERIOD);
+    append_event(
+        &paths.events,
+        handle,
+        number,
+        TaskEventKind::OrphanedChildDisposed { disposition },
+    )
 }
 
 fn prepare_recovery(

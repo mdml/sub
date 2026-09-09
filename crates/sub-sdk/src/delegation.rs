@@ -153,8 +153,8 @@ pub struct ExecutionAttempt {
 
 /// Operating-system identity of the harness child an attempt's supervisor spawned.
 ///
-/// Recorded so a later cancel can end an orphaned attempt's child without a live supervisor,
-/// and verified against the process start token before any signal is sent.
+/// Recorded so a later cancel or recover can end an orphaned attempt's child without a live
+/// supervisor, and verified against the process start token before any signal is sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessChild {
     /// Process identifier of the direct bridge or harness child.
@@ -323,7 +323,7 @@ pub enum TaskEventKind {
         /// Whether the harness acknowledged ACP cancellation within the grace period.
         harness_honored: bool,
     },
-    /// Cancel ended an orphaned attempt and dealt with its recorded harness child.
+    /// Cancel or recover dealt with an orphaned attempt's recorded harness child.
     OrphanedChildDisposed {
         /// What `sub` could establish and do about the child process.
         disposition: OrphanedChildDisposition,

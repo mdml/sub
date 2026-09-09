@@ -48,7 +48,7 @@ The second inspect reports both task and attempt 1 as `orphaned`, not running or
 "$SUB_BIN" inspect "$HANDLE" --state-dir "$STATE_DIR"
 ```
 
-Recovery returns the same task handle and `attempt: 2`. The final inspection shows attempt 1 `orphaned`, attempt 2 `succeeded`, the same harness session ID on both attempts, `attempt_orphaned` and `attempt_resumed`, per-attempt usage, and the accumulated task usage. The child explicitly reported continuing the interrupted wait without starting another delay, which demonstrates continuation rather than original-prompt replay.
+Recovery returns the same task handle and `attempt: 2`. The final inspection shows attempt 1 `orphaned`, attempt 2 `succeeded`, the same harness session ID on both attempts, `attempt_orphaned` and `attempt_resumed`, per-attempt usage, and the accumulated task usage. The captured run predates the 2026-09-09 decision that [recover disposes of the orphaned attempt's child](../decisions/2026-09-09-recover-disposes-orphaned-child.md), so its evidence shows attempt 1's harness child still running alongside attempt 2. A rerun records `orphaned_child_disposed` on attempt 1 between `attempt_orphaned` and attempt 2's `attempt_started`, with disposition `terminated` for the child killed here by `kill -9` on its supervisor alone, and leaves one live child. The child explicitly reported continuing the interrupted wait without starting another delay, which demonstrates continuation rather than original-prompt replay.
 
 ## MCP parity
 
