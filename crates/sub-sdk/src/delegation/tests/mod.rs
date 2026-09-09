@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::acp::{StopReason, StreamUpdate, StreamUpdateKind};
 
-use super::liveness::process_start_time;
+use super::liveness::{process_group, process_start_time};
 use super::result::{derive_changed_files, markdown_destinations};
 use super::supervisor::supervisor_command;
 use super::*;
@@ -85,7 +85,28 @@ fn prepare_resume_attempt(
     paths
 }
 
+/// Spawn a long-lived process that stands in for an attempt's harness child.
+fn spawn_sleeper() -> std::process::Child {
+    std::process::Command::new("sleep")
+        .arg("30")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap_or_else(|error| panic!("spawn: {error}"))
+}
+
+/// The identity a supervisor would have recorded for a live child.
+fn identity_of(child: &std::process::Child) -> HarnessChild {
+    HarnessChild {
+        pid: child.id(),
+        start_time: process_start_time(child.id()).unwrap_or_else(|| panic!("start time")),
+        process_group: process_group(child.id()),
+    }
+}
+
 mod lifecycle_cancel_orphan;
+mod lifecycle_cancel_orphan_child;
 mod lifecycle_cancel_terminal;
 mod lifecycle_list;
 mod lifecycle_orphan;

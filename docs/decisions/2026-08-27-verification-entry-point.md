@@ -1,6 +1,6 @@
 # Verification entry point and gates
 
-Date: 2026-08-27. Status: adopted.
+Date: 2026-08-27. Status: adopted, with gate definitions superseded by [`2026-09-02-verification-gates.md`](2026-09-02-verification-gates.md).
 
 ## Decision
 

@@ -34,7 +34,7 @@ permission_mode = "bypassPermissions"
 binary = "$CODEX_BIN"
 permission_mode = "agent"
 
-[harnesses.cursor]
+[harnesses.cursor-agent]
 binary = "$CURSOR_BIN"
 permission_mode = "agent"
 ```
@@ -42,11 +42,11 @@ permission_mode = "agent"
 Run the one onboarding action twice:
 
 ```sh
-sub onboard claude codex cursor
-sub onboard claude codex cursor
+sub onboard claude codex cursor-agent
+sub onboard claude codex cursor-agent
 ```
 
-The first run reports installed Claude and Codex bridges, Cursor's bridge as `not_required`, and created skills and MCP registrations. The second reports the two installed bridges, all skills, and all registrations unchanged while Cursor's bridge remains `not_required`. The resulting throwaway layout contains only the three requested harness roots, the selected state directory, and `sub.toml`. Scrubbed reports and layout are in [`../../scenarios/onboarding/evidence/`](../../scenarios/onboarding/evidence/); `onboard-cursor.json` captures the isolated Cursor addition.
+The first run reports installed Claude and Codex bridges, Cursor's bridge as `not_required`, and created skills and MCP registrations. The second reports the two installed bridges, all skills, and all registrations unchanged while Cursor's bridge remains `not_required`. The resulting throwaway layout contains only the three requested harness roots, the selected state directory, and `sub.toml`. Scrubbed reports and layout are in [`../../scenarios/onboarding/evidence/`](../../scenarios/onboarding/evidence/); `onboard-cursor.json` captures the isolated Cursor addition. The evidence was captured before the 2026-09-08 rename of the public harness identifier from `cursor` to `cursor-agent`, so its `harness` field still reads `cursor`.
 
 ## Config-only launch and wait
 

@@ -14,6 +14,7 @@ fn cancel_reports_too_late_for_a_terminal_attempt() {
         supervisor_pid: None,
         supervisor_start_time: None,
         harness_session_id: Some("fixture-session".to_owned()),
+        harness_child: None,
         usage: UsageTotals::default(),
     };
     write_json(&paths.state, &attempt).unwrap_or_else(|error| panic!("state: {error}"));

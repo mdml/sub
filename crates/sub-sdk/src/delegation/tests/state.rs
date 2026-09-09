@@ -61,6 +61,7 @@ fn liveness_rejects_missing_process_identity() {
         supervisor_pid: None,
         supervisor_start_time: None,
         harness_session_id: None,
+        harness_child: None,
         usage: UsageTotals::default(),
     };
     assert!(!supervisor_is_alive(&attempt));

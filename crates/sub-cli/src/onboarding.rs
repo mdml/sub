@@ -22,7 +22,7 @@ Use `sub` when a bounded task benefits from parallel work, another harness, or i
 1. Call `sub_launch` with one bounded prompt, the child harness, and its working directory. Keep the returned handle. Configuration supplies binary, model, and permission defaults unless the call overrides them.
 2. Call `sub_wait` with the handle. If it is still running, wait again. Prefer the bounded result and artifact references over reconstructing the child transcript.
 3. Use `sub_inspect` for task state and normalized evidence, or `sub_list` to find handles. If work is wrong or no longer needed, call `sub_cancel`.
-4. If inspection or wait reports `orphaned`, call `sub_recover` once, then wait on the same handle.
+4. If inspection or wait reports `orphaned`, call `sub_recover` once, then wait on the same handle. If the work is no longer needed, call `sub_cancel` instead; it ends the orphaned task and its child.
 
 Give each child one bounded task with an explicit expected result. Never ask a child to create subagents or delegate again.
 
@@ -142,7 +142,7 @@ fn onboard_harness(harness: Harness, context: &OnboardContext<'_>) -> Result<Rep
             let binary = &context
                 .config
                 .harness(Harness::CursorAgent)
-                .ok_or_else(|| "cursor is not configured in sub.toml".to_owned())?
+                .ok_or_else(|| "cursor-agent is not configured in sub.toml".to_owned())?
                 .binary;
             let bridge = sub_adapter_cursor::install_bridge(binary);
             (Status::NotRequired, bridge.binary)
@@ -296,7 +296,7 @@ const fn harness_name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "claude",
         Harness::Codex => "codex",
-        Harness::CursorAgent => "cursor",
+        Harness::CursorAgent => "cursor-agent",
     }
 }
 
@@ -412,7 +412,7 @@ mod tests {
         assert!(!locations.claude_config.exists());
 
         let cursor_config: SubConfig = toml::from_str(
-            "[harnesses.cursor]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
+            "[harnesses.cursor-agent]\nbinary = '/bin/cursor-agent'\npermission_mode = 'agent'\n",
         )
         .unwrap_or_else(|error| panic!("cursor config: {error}"));
         let reports = onboard_test(

@@ -10,6 +10,6 @@ The manager's delegation skill tells the manager to capture the handle, run `sub
 
 ## Labels and stable candidates
 
-Use `harness:claude`, `harness:codex`, or `harness:cursor` to identify the child integration involved. Use `regression` only when behavior worked in an earlier release.
+Use `harness:claude`, `harness:codex`, or `harness:cursor-agent` to identify the child integration involved. Use `regression` only when behavior worked in an earlier release.
 
 `stable-candidate` means that the commits from a merged PR are proposed as named fixes for the next assembled stable pointer. It is not a promise that the change will ship. When the stable promotion dispatch has no explicit cherry-pick list, it finds merged PRs with this label, keeps their commits that are in `main` after the selected nightly base, orders them as they appear in `main`, and shows that default in the preview summary for confirmation.

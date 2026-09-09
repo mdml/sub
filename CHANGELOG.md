@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Rename the public harness identifier `cursor` to `cursor-agent` across `sub.toml` (`[harnesses.cursor-agent]`), CLI `--harness` and `sub onboard` values, MCP `harness` enum values, serialized task state, onboarding reports, native-session locators, and the `harness:cursor-agent` issue label; public harness identifiers are now the harness binary names. Existing task state written with `cursor` or `cursor_agent` still loads.
+- Dispose of the orphaned attempt's harness child during recovery: `sub recover` / `sub_recover` now end that child through the same verified-identity path orphaned cancel uses and record `orphaned_child_disposed` on the orphaned attempt before attempt N+1's supervisor starts, so a recovered task has one live child.
+- Make cancel terminal for an orphaned attempt: `sub cancel` / `sub_cancel` on a task whose supervisor died now end the recorded harness child when its PID and start identity verify, publish a cancelled result, record `attempt_orphaned`, `orphaned_child_disposed`, `attempt_cancelled`, and `attempt_finished`, and reject later recovery; supervisors record the bridge child's identity in attempt state at spawn.
+- Ship nightly and stable releases only for Linux x86_64 and aarch64 until a real-harness beta-path proof is recorded on macOS; retain macOS supervision and fake-harness CI as preparation.
 - Stamp nightly build checkouts with their prerelease tag version, verify `sub --version` before packaging, and document mise's replacement GitHub backend for Release installs.
 - Make detached supervision and PID-reuse-safe orphan detection uniform across Linux and macOS by using in-process `setsid(2)` and platform process start identities; force-terminate and reap an ignored-cancel child before publishing its cancelled result.
 - Establish `staging`, `main`, and `stable` as development, nightly, and assembled stable channels, with merge-commit promotion into `main`, workflow-owned tags, whole-tree release gates, stable-only Homebrew publishing, and automated release-prep reconciliation to `staging`.
@@ -13,13 +17,19 @@ All notable changes to this project are documented here. The format follows [Kee
 - Refactor the delegation kernel, ACP client, CLI, MCP, fake harness, and contract tests into focused modules while preserving public and serialized shapes; the whole tracked Rust tree now establishes a CodeScene health-10 baseline for all scorable files.
 - Align harness-nightly and release-trigger documentation with the implemented scripts and workflows.
 
+### Fixed
+
+- Remove Linux aarch64 from nightly and stable release targets because it also lacks a recorded real-harness beta-path proof; Linux x86_64 is the only shipped target, and Linux aarch64 and macOS return after a proof is recorded for each platform.
+
+- Restore the unconditional GitHub nightly vulnerability check so advisories are checked even when `main` has not moved, while retaining full verification only for changed release candidates.
+
 ### Added
 
 - Add a clearly named macOS CI job that runs the workspace tests and fake-harness contract without real harnesses or CodeScene.
 - Nightly GitHub prereleases built outside cargo-dist tag planning, a preview/confirm stable-promotion workflow with `stable-candidate` defaults and 0.x Conventional Commit versioning, and deploy-key-only branch/tag rulesets.
 - Structured bug and feature issue forms, harness/regression/stable-candidate labels, reporting-flow documentation, and CLI `sub report <handle>` for scrubbed, reviewable issue commands without submission or credential access.
 - A `sub`-failure section in the installed delegation skill that hands report drafts to the user and forbids managers from filing issues.
-- Real `sub-adapter-cursor` support under the canonical `cursor` harness name: native `cursor-agent acp` launch with no bridge, native permission modes, prompt-level subagent guard plus Cursor task observation, false/false usage support, `session/load` recovery without replay double counting, onboarding, a stamped real-stream fixture and contract run, and a non-gating Cursor beta-path variant.
+- Real `sub-adapter-cursor` support under the `cursor-agent` harness name: native `cursor-agent acp` launch with no bridge, native permission modes, prompt-level subagent guard plus Cursor task observation, false/false usage support, `session/load` recovery without replay double counting, onboarding, a stamped real-stream fixture and contract run, and a non-gating Cursor beta-path variant.
 - Beta-minimum `sub.toml` discovery with configured state directory and per-harness binary, model, and permission-mode defaults shared by CLI and MCP launch; explicit arguments retain precedence.
 - Idempotent `sub onboard <claude|codex>...` for pinned bridge installation, the `sub-delegation` manager skill, and user-level MCP registration, with per-harness action reports and throwaway-root overrides.
 - Unit and integration coverage for config discovery, launch precedence, scoped onboarding, repair/idempotence, and matching CLI/MCP `LaunchParams`.

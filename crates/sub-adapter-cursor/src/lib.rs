@@ -6,7 +6,7 @@ use sub_sdk::acp::HarnessLaunch;
 use sub_sdk::delegation::ResumeMechanism;
 
 /// Name of the harness this adapter drives.
-pub const HARNESS_NAME: &str = "cursor";
+pub const HARNESS_NAME: &str = "cursor-agent";
 /// Cursor Agent versions exercised by the ACP spike and real-harness contract suite.
 pub const VERIFIED_HARNESS_VERSIONS: &[&str] = &["2026.08.25-3e8eec8"];
 /// Cursor reopens an existing session through replaying ACP `session/load`.
@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn native_launch_has_no_bridge_or_side_channel() {
-        assert_eq!(HARNESS_NAME, "cursor");
+        assert_eq!(HARNESS_NAME, "cursor-agent");
         assert_eq!(
             launch(Path::new("/bin/cursor-agent")).command(),
             PathBuf::from("/bin/cursor-agent")

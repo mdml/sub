@@ -24,7 +24,7 @@ binary = "/home/alice/.local/bin/codex"
 model = "gpt-5"
 permission_mode = "agent"
 
-[harnesses.cursor]
+[harnesses.cursor-agent]
 binary = "/home/alice/.local/bin/cursor-agent"
 permission_mode = "agent"
 ```
@@ -33,7 +33,7 @@ Build both surfaces, then explicitly onboard only the requested manager harnesse
 
 ```sh
 cargo build -p sub-cli -p sub-mcp
-target/debug/sub onboard claude codex cursor
+target/debug/sub onboard claude codex cursor-agent
 ```
 
 Re-running onboarding repairs stale files or reports `unchanged`; it never configures an unnamed harness. `sub` uses each harness's existing authentication and never holds credentials. See [`docs/decisions/2026-09-01-onboarding-installation.md`](docs/decisions/2026-09-01-onboarding-installation.md).
@@ -47,7 +47,7 @@ target/debug/sub launch --harness codex --cwd "$PWD" --prompt "Review the curren
 target/debug/sub wait tsk_REPLACE_WITH_HANDLE --timeout-seconds 30
 ```
 
-If wait returns `{"state":"running",...}`, call it again with the same handle. If inspection reports `orphaned`, explicit recover creates the next attempt and resumes the recorded harness session. Cancel returns its delivery disposition immediately; observe or wait for the terminal result.
+If wait returns `{"state":"running",...}`, call it again with the same handle. If inspection reports `orphaned`, explicit recover creates the next attempt and resumes the recorded harness session, or cancel ends the task there. Cancel returns its delivery disposition immediately; observe or wait for the terminal result.
 
 ```sh
 target/debug/sub recover tsk_REPLACE_WITH_HANDLE
@@ -67,6 +67,10 @@ The MCP server also exposes `sub_list` and `sub_inspect`. Both surfaces serializ
 
 If `sub` itself misbehaves, `sub report tsk_REPLACE_WITH_HANDLE` prints a scrubbed `gh issue create` command for the user to review. It never submits the issue or accesses credentials. See [`docs/reporting.md`](docs/reporting.md).
 
+## Install
+
+Releases ship only for Linux x86_64. Stable releases are distributed through Homebrew, mise, and `cargo binstall`; nightly archives are published as GitHub prereleases. See [`docs/release.md`](docs/release.md) for channels and installation details. Linux aarch64 and macOS return to the shipped target list when the beta path has been run with real harnesses on each platform and recorded under `docs/proofs/`. The macOS supervision code and fake-harness CI remain as preparation.
+
 ## Build
 
 Requirements: `rustup` (the toolchain in `rust-toolchain.toml` installs itself on first use) and, for the verification tools, [`mise`](https://mise.jdx.dev).
@@ -79,8 +83,8 @@ cargo build --workspace
 ## Verify
 
 ```sh
-scripts/verify.sh          # per-commit gate: format, lint, build, docs, tests with coverage
-scripts/verify.sh --full   # full gate: adds dependency audit and CodeScene (needs CS_ACCESS_TOKEN)
+scripts/verify.sh          # per-commit gate: format, lint, build, docs, tests with coverage, changed-file CodeScene (requires CS_ACCESS_TOKEN)
+scripts/verify.sh --full   # full gate: adds dependency audit, uses PR-base-relative CodeScene (requires CS_ACCESS_TOKEN)
 ```
 
 `just verify` and `just verify-full` are aliases. See [`docs/verification.md`](docs/verification.md).

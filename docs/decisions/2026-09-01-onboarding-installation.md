@@ -1,6 +1,6 @@
 # Onboarding installation for Claude and Codex
 
-Date: 2026-09-01. Status: adopted.
+Date: 2026-09-01. Status: superseded in part on 2026-09-01 by [Cursor native ACP transport and extension handling](2026-09-01-cursor-native-acp-and-extensions.md); onboarding also covers Cursor and reports `not_required` for its bridge; the remaining installation mechanics remain adopted.
 
 ## Decision
 

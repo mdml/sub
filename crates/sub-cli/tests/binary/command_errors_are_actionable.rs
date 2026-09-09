@@ -4,7 +4,7 @@ use super::*;
 fn command_errors_are_actionable() {
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let binary = env!("CARGO_BIN_EXE_sub");
-    let unsupported = Command::new(binary)
+    let unsupported = sub_command(binary, root.path())
         .args(["bridge", "install", "unknown", "--state-dir"])
         .arg(root.path())
         .output()
@@ -12,7 +12,7 @@ fn command_errors_are_actionable() {
     assert!(!unsupported.status.success());
     assert!(String::from_utf8_lossy(&unsupported.stderr).contains("unsupported harness"));
 
-    let unknown = Command::new(binary)
+    let unknown = sub_command(binary, root.path())
         .args([
             "wait",
             "tsk_000000000000000000000000",
@@ -26,7 +26,7 @@ fn command_errors_are_actionable() {
     assert!(!unknown.status.success());
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown task handle"));
 
-    let recover = Command::new(binary)
+    let recover = sub_command(binary, root.path())
         .args(["recover", "tsk_000000000000000000000000", "--state-dir"])
         .arg(root.path())
         .output()
@@ -34,7 +34,7 @@ fn command_errors_are_actionable() {
     assert!(!recover.status.success());
     assert!(String::from_utf8_lossy(&recover.stderr).contains("unknown task handle"));
 
-    let cancel = Command::new(binary)
+    let cancel = sub_command(binary, root.path())
         .args(["cancel", "tsk_000000000000000000000000", "--state-dir"])
         .arg(root.path())
         .output()
@@ -42,7 +42,7 @@ fn command_errors_are_actionable() {
     assert!(!cancel.status.success());
     assert!(String::from_utf8_lossy(&cancel.stderr).contains("unknown task handle"));
 
-    let incomplete = Command::new(binary)
+    let incomplete = sub_command(binary, root.path())
         .arg("launch")
         .output()
         .unwrap_or_else(|error| panic!("run: {error}"));
@@ -54,7 +54,7 @@ fn command_errors_are_actionable() {
         vec!["wait"],
         vec!["not-a-command"],
     ] {
-        let output = Command::new(binary)
+        let output = sub_command(binary, root.path())
             .args(args)
             .output()
             .unwrap_or_else(|error| panic!("run: {error}"));

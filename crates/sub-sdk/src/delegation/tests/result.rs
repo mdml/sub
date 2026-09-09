@@ -70,13 +70,15 @@ fn cursor_usage_support_is_explicitly_absent() {
     assert_eq!(
         serde_json::to_value(Harness::CursorAgent)
             .unwrap_or_else(|error| panic!("serialize cursor: {error}")),
-        serde_json::json!("cursor")
+        serde_json::json!("cursor-agent")
     );
-    assert_eq!(
-        serde_json::from_value::<Harness>(serde_json::json!("cursor_agent"))
-            .unwrap_or_else(|error| panic!("deserialize legacy cursor: {error}")),
-        Harness::CursorAgent
-    );
+    for legacy in ["cursor", "cursor_agent"] {
+        assert_eq!(
+            serde_json::from_value::<Harness>(serde_json::json!(legacy))
+                .unwrap_or_else(|error| panic!("deserialize legacy {legacy}: {error}")),
+            Harness::CursorAgent
+        );
+    }
 }
 
 #[test]
@@ -85,7 +87,8 @@ fn native_fallback_uses_each_harness_name() {
     assert!(native_session_reference(Harness::Claude, cwd, "missing-claude").contains("claude"));
     assert!(native_session_reference(Harness::Codex, cwd, "missing-codex").contains("codex"));
     assert!(
-        native_session_reference(Harness::CursorAgent, cwd, "missing-cursor").contains("cursor")
+        native_session_reference(Harness::CursorAgent, cwd, "missing-cursor")
+            .contains("cursor-agent:")
     );
 }
 

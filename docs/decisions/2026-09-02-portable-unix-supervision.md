@@ -2,6 +2,14 @@
 
 Date: 2026-09-02. Status: adopted.
 
+## Status update — 2026-09-08
+
+The supervision implementation remains adopted, but the shipped targets are now Linux x86_64 and aarch64. macOS is removed from nightly and stable release builds until the beta path has been run with real harnesses on macOS and recorded under `docs/proofs/`. The macOS supervision code and fake-harness CI job remain as preparation; fake-harness CI is not a real-harness demonstration. This updates the release-target statement in the dated decision below; the original decision body is preserved. See [`../release.md`](../release.md) for current distribution.
+
+## Status update — 2026-09-09
+
+Linux x86_64 is the only shipped target for nightly and stable releases. Linux aarch64 also has no recorded real-harness beta-path proof and is removed from release builds. Linux aarch64 and macOS return when the beta path has been run with real harnesses on each platform and recorded under `docs/proofs/`. The supervision implementation and macOS fake-harness CI remain as preparation. This supersedes the shipped-target list in the 2026-09-08 status update; see [`../release.md`](../release.md) for current distribution.
+
 ## Decision
 
 On every supported Unix target, `sub` starts each supervisor directly and calls `setsid(2)` in the child's `pre_exec` hook. The spawn no longer depends on an external `setsid` executable. The `libc` crate is an exact direct dependency and supplies the platform bindings; the workspace denies unsafe code by default and permits each audited process-control FFI site locally.

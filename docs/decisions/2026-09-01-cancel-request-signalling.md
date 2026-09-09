@@ -1,6 +1,6 @@
 # Cross-process cancel request signalling
 
-Date: 2026-09-01. Status: adopted.
+Date: 2026-09-01. Status: superseded in part on 2026-09-08 by [Terminal cancel on an orphaned attempt](2026-09-08-terminal-cancel-on-orphaned-attempt.md); the request marker, the `delivered` and `already_finished` dispositions, and the private layout remain adopted. `attempt_orphaned` no longer means that nothing was written.
 
 ## Decision
 

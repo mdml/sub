@@ -9,6 +9,7 @@ use crate::acp::{HarnessLaunch, TurnUsage};
 
 mod events;
 mod liveness;
+mod orphan;
 mod recovery;
 mod result;
 mod state;
@@ -23,7 +24,7 @@ pub enum Harness {
     /// `OpenAI Codex`.
     Codex,
     /// Cursor Agent.
-    #[serde(rename = "cursor", alias = "cursor_agent")]
+    #[serde(rename = "cursor-agent", alias = "cursor", alias = "cursor_agent")]
     CursorAgent,
 }
 
@@ -142,9 +143,38 @@ pub struct ExecutionAttempt {
     pub supervisor_start_time: Option<u64>,
     /// Vendor-owned session identifier once session creation succeeds.
     pub harness_session_id: Option<String>,
+    /// Identity of the harness child spawned by this attempt's supervisor, once known.
+    #[serde(default)]
+    pub harness_child: Option<HarnessChild>,
     /// Usage accumulated for this attempt.
     #[serde(default)]
     pub usage: UsageTotals,
+}
+
+/// Operating-system identity of the harness child an attempt's supervisor spawned.
+///
+/// Recorded so a later cancel or recover can end an orphaned attempt's child without a live
+/// supervisor, and verified against the process start token before any signal is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessChild {
+    /// Process identifier of the direct bridge or harness child.
+    pub pid: u32,
+    /// Operating-system process start token used to reject PID reuse.
+    pub start_time: u64,
+    /// Process group the child leads, when the supervisor observed one.
+    pub process_group: Option<u32>,
+}
+
+impl HarnessChild {
+    /// Observe the current identity of a live process, or `None` when it cannot be read.
+    #[must_use]
+    pub fn observe(pid: u32) -> Option<Self> {
+        Some(Self {
+            pid,
+            start_time: liveness::process_start_time(pid)?,
+            process_group: liveness::process_group(pid),
+        })
+    }
 }
 
 /// Adapter-prepared launch data consumed by the shared ACP client layer.
@@ -293,6 +323,11 @@ pub enum TaskEventKind {
         /// Whether the harness acknowledged ACP cancellation within the grace period.
         harness_honored: bool,
     },
+    /// Cancel or recover dealt with an orphaned attempt's recorded harness child.
+    OrphanedChildDisposed {
+        /// What `sub` could establish and do about the child process.
+        disposition: OrphanedChildDisposition,
+    },
     /// Recovery was rejected before a new attempt because the task is terminal.
     AttemptRecoveryRejected {
         /// Stable terminal reason.
@@ -327,6 +362,22 @@ pub enum ResumeFailureReason {
     HarnessRefused,
 }
 
+/// What cancel established about an orphaned attempt's harness child.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrphanedChildDisposition {
+    /// The recorded child was verified live, signalled, and observed to exit.
+    Terminated,
+    /// The recorded child was verified live and outlived both the grace signal and force.
+    SurvivedTermination,
+    /// No process with the recorded PID exists any more.
+    AlreadyGone,
+    /// A process with the recorded PID exists but its start token differs; nothing was signalled.
+    IdentityUnverified,
+    /// The orphaned attempt never recorded its child's identity; nothing was signalled.
+    IdentityUnrecorded,
+}
+
 /// Why a terminal task cannot be recovered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -343,7 +394,8 @@ pub enum CancelDelivery {
     Delivered,
     /// The latest attempt already has a terminal status.
     AlreadyFinished,
-    /// The latest attempt lost its supervisor.
+    /// The latest attempt had lost its supervisor, so the kernel cancelled it directly; the
+    /// cancelled result is already durable.
     AttemptOrphaned,
 }
 

@@ -34,3 +34,6 @@ One file per repository-level decision, named `YYYY-MM-DD-<slug>.md`. Each state
 | 2026-09-02 | [Nightly and stable release mechanics](2026-09-02-release-channels.md) |
 | 2026-09-02 | [Mise GitHub Release backend](2026-09-02-mise-github-backend.md) |
 | 2026-09-02 | [Scrubbed issue-report drafts](2026-09-02-report-drafts.md) |
+| 2026-09-08 | [Harness identifiers are binary names](2026-09-08-harness-identifiers.md) |
+| 2026-09-08 | [Terminal cancel on an orphaned attempt](2026-09-08-terminal-cancel-on-orphaned-attempt.md) |
+| 2026-09-09 | [Recover disposes of the orphaned attempt's child](2026-09-09-recover-disposes-orphaned-child.md) |

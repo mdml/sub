@@ -18,7 +18,7 @@ fn install_launch_and_wait_use_one_durable_shape() {
     );
     let binary = env!("CARGO_BIN_EXE_sub");
     for harness in ["claude", "codex"] {
-        let output = Command::new(binary)
+        let output = sub_command(binary, root.path())
             .args(["bridge", "install", harness, "--state-dir"])
             .arg(root.path())
             .env("PATH", &path)
@@ -58,7 +58,7 @@ impl HarnessCase {
 }
 
 fn exercise_harness(root: &std::path::Path, binary: &std::path::Path, harness: HarnessCase) {
-    let mut command = Command::new(binary);
+    let mut command = sub_command(binary, root);
     command
         .args(["launch", "--harness", harness.name(), "--cwd"])
         .arg(root)
@@ -84,7 +84,7 @@ fn exercise_harness(root: &std::path::Path, binary: &std::path::Path, harness: H
     let value: serde_json::Value =
         serde_json::from_slice(&launch.stdout).unwrap_or_else(|error| panic!("json: {error}"));
     let handle = value["id"].as_str().unwrap_or_else(|| panic!("handle"));
-    let wait = Command::new(binary)
+    let wait = sub_command(binary, root)
         .args(["wait", handle, "--timeout-seconds", "3"])
         .env("SUB_STATE_DIR", root)
         .output()
@@ -95,14 +95,14 @@ fn exercise_harness(root: &std::path::Path, binary: &std::path::Path, harness: H
         String::from_utf8_lossy(&wait.stderr)
     );
     assert!(String::from_utf8_lossy(&wait.stdout).contains("failed"));
-    let listed = Command::new(binary)
+    let listed = sub_command(binary, root)
         .args(["list", "--state-dir"])
         .arg(root)
         .output()
         .unwrap_or_else(|error| panic!("list: {error}"));
     assert!(listed.status.success());
     assert!(String::from_utf8_lossy(&listed.stdout).contains(handle));
-    let inspected = Command::new(binary)
+    let inspected = sub_command(binary, root)
         .args(["inspect", handle, "--state-dir"])
         .arg(root)
         .output()

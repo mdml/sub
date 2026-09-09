@@ -146,7 +146,7 @@ pub(super) fn native_session_reference(harness: Harness, cwd: &Path, session_id:
             match harness {
                 Harness::Claude => "claude",
                 Harness::Codex => "codex",
-                Harness::CursorAgent => "cursor",
+                Harness::CursorAgent => "cursor-agent",
             }
         );
     };
@@ -168,7 +168,7 @@ pub(super) fn native_session_reference(harness: Harness, cwd: &Path, session_id:
                 match harness {
                     Harness::Claude => "claude",
                     Harness::Codex => "codex",
-                    Harness::CursorAgent => "cursor",
+                    Harness::CursorAgent => "cursor-agent",
                 },
                 cwd.display(),
                 session_id

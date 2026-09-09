@@ -1,6 +1,6 @@
 # Recovery attempts and bridge session resume
 
-Date: 2026-09-01. Status: adopted.
+Date: 2026-09-01. Status: superseded in part on 2026-09-01 by [Cursor native ACP transport and extension handling](2026-09-01-cursor-native-acp-and-extensions.md); the Cursor adapter implements `ResumeMechanism::Load`; the recovery mechanics remain adopted. Superseded in part on 2026-09-09 by [Recover disposes of the orphaned attempt's child](2026-09-09-recover-disposes-orphaned-child.md); recover now ends the orphaned attempt's recorded harness child before it spawns the next attempt's supervisor.
 
 ## Decision
 
