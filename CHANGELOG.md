@@ -18,6 +18,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Remove Linux aarch64 from nightly and stable release targets because it also lacks a recorded real-harness beta-path proof; Linux x86_64 is the only shipped target, and Linux aarch64 and macOS return after a proof is recorded for each platform.
+
 - Restore the unconditional GitHub nightly vulnerability check so advisories are checked even when `main` has not moved, while retaining full verification only for changed release candidates.
 
 ### Added
