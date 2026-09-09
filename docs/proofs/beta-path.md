@@ -40,6 +40,6 @@ Wait until inspection reports attempt 2 `running`, the same harness session ID o
 
 ## Expected proof
 
-The final inspection reports attempt 1 `orphaned`, attempt 2 `cancelled`, one stable task handle and harness session ID, and the lifecycle sequence `attempt_started` → `attempt_orphaned` → `attempt_started` → `attempt_resumed` → `attempt_cancelled` → `attempt_finished`. Cancel returns `delivered`; wait returns the partial cancelled result with normalized and native evidence references intact. The resumed child states that it preserved elapsed work rather than replaying the original task, demonstrating recovery before cancellation.
+The final inspection reports attempt 1 `orphaned`, attempt 2 `cancelled`, one stable task handle and harness session ID, and the lifecycle sequence `attempt_started` → `attempt_orphaned` → `attempt_started` → `attempt_resumed` → `attempt_cancelled` → `attempt_finished`. The captured run predates the 2026-09-09 decision that [recover disposes of the orphaned attempt's child](../decisions/2026-09-09-recover-disposes-orphaned-child.md); a rerun adds `orphaned_child_disposed` after `attempt_orphaned` and before attempt 2's `attempt_started`. Cancel returns `delivered`; wait returns the partial cancelled result with normalized and native evidence references intact. The resumed child states that it preserved elapsed work rather than replaying the original task, demonstrating recovery before cancellation.
 
 Captured, scrubbed evidence is under [`../../proofs/beta-path/evidence/`](../../proofs/beta-path/evidence/).

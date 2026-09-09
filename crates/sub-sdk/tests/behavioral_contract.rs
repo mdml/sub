@@ -59,5 +59,7 @@ mod permission_request_is_denied_and_surfaced;
 mod real_harness_mode_entrypoint;
 #[path = "behavioral_contract/recorded_cursor_fixture_has_activity_without_usage.rs"]
 mod recorded_cursor_fixture_has_activity_without_usage;
+#[path = "behavioral_contract/recover_ends_the_orphaned_child_before_resuming.rs"]
+mod recover_ends_the_orphaned_child_before_resuming;
 #[path = "behavioral_contract/resume_refused_by_harness_is_an_error.rs"]
 mod resume_refused_by_harness_is_an_error;
