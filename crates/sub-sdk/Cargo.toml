@@ -19,7 +19,7 @@ toml.workspace = true
 sha2.workspace = true
 hex.workspace = true
 libc.workspace = true
-thiserror = "=2.0.20"
+thiserror = "=2.0.21"
 
 [dev-dependencies]
 sub-harness-fake.workspace = true
