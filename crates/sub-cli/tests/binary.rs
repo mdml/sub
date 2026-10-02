@@ -13,15 +13,28 @@ fn existing_binary() -> std::path::PathBuf {
     std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"))
 }
 
+/// Write an executable fixture from a child shell, so this multi-threaded test process never holds a write descriptor that a child forked by a sibling test could inherit; Linux fails `exec` of a file open for writing with `ETXTBSY`.
+#[cfg(unix)]
+fn write_executable(path: &std::path::Path, script: &str) {
+    let status = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "printf '%s' \"$2\" > \"$1\" && chmod 755 \"$1\"",
+            "write-executable",
+        ])
+        .arg(path)
+        .arg(script)
+        .status()
+        .unwrap_or_else(|error| panic!("write executable: {error}"));
+    assert!(status.success(), "write executable: {status}");
+}
+
 #[cfg(unix)]
 fn fake_npm(root: &std::path::Path) -> String {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-    let npm = root.join("npm");
-    fs::write(&npm, "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nfor name in codex-acp claude-agent-acp; do printf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/$name\"; chmod +x \"$prefix/node_modules/.bin/$name\"; done\n")
-        .unwrap_or_else(|error| panic!("npm: {error}"));
-    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755))
-        .unwrap_or_else(|error| panic!("permissions: {error}"));
+    write_executable(
+        &root.join("npm"),
+        "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nfor name in codex-acp claude-agent-acp; do printf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/$name\"; chmod +x \"$prefix/node_modules/.bin/$name\"; done\n",
+    );
     format!(
         "{}:{}",
         root.display(),
@@ -104,6 +117,8 @@ mod cancel_ends_an_orphaned_task_and_its_child;
 mod command_errors_are_actionable;
 #[path = "binary/config_supplies_launch_values_and_explicit_arguments_win.rs"]
 mod config_supplies_launch_values_and_explicit_arguments_win;
+#[path = "binary/fixture_executables_run_while_sibling_threads_spawn.rs"]
+mod fixture_executables_run_while_sibling_threads_spawn;
 #[path = "binary/install_launch_and_wait_use_one_durable_shape.rs"]
 mod install_launch_and_wait_use_one_durable_shape;
 #[path = "binary/onboarding_is_scoped_and_idempotent_in_throwaway_roots.rs"]

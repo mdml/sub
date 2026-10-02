@@ -3,19 +3,8 @@ use super::*;
 #[cfg(unix)]
 #[test]
 fn install_launch_and_wait_use_one_durable_shape() {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
-    let npm = root.path().join("npm");
-    fs::write(&npm, "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nfor name in codex-acp claude-agent-acp; do printf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/$name\"; chmod +x \"$prefix/node_modules/.bin/$name\"; done\n")
-        .unwrap_or_else(|error| panic!("npm: {error}"));
-    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755))
-        .unwrap_or_else(|error| panic!("permissions: {error}"));
-    let path = format!(
-        "{}:{}",
-        root.path().display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
+    let path = fake_npm(root.path());
     let binary = env!("CARGO_BIN_EXE_sub");
     for harness in ["claude", "codex"] {
         let output = sub_command(binary, root.path())

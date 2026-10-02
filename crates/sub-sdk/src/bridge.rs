@@ -234,6 +234,22 @@ fn collect_entries(directory: &Path, entries: &mut Vec<PathBuf>) -> io::Result<(
 mod tests {
     use super::*;
 
+    /// Write an executable fixture from a child shell, so this multi-threaded test process never holds a write descriptor that a child forked by a sibling test could inherit; Linux fails `exec` of a file open for writing with `ETXTBSY`.
+    #[cfg(unix)]
+    fn write_executable(path: &std::path::Path, script: &str) {
+        let status = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "printf '%s' \"$2\" > \"$1\" && chmod 755 \"$1\"",
+                "write-executable",
+            ])
+            .arg(path)
+            .arg(script)
+            .status()
+            .unwrap_or_else(|error| panic!("write executable: {error}"));
+        assert!(status.success(), "write executable: {status}");
+    }
+
     const SPEC: BridgeSpec = BridgeSpec {
         package: "@example/bridge",
         version: "1.2.3",
@@ -263,15 +279,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn fake_npm_install_writes_and_verifies_manifest() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
         let npm = root.path().join("npm");
-        fs::write(
+        write_executable(
             &npm,
             "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nprintf '#!/bin/sh\\n' > \"$prefix/node_modules/.bin/example\"\nchmod +x \"$prefix/node_modules/.bin/example\"\n",
-        ).unwrap_or_else(|error| panic!("script: {error}"));
-        fs::set_permissions(&npm, fs::Permissions::from_mode(0o755))
-            .unwrap_or_else(|error| panic!("permissions: {error}"));
+        );
         let stale = bridge_dir(root.path(), SPEC)
             .parent()
             .unwrap_or_else(|| panic!("bridge parent"))
@@ -295,12 +308,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn fake_npm_failure_is_reported() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
         let npm = root.path().join("npm-fail");
-        fs::write(&npm, "#!/bin/sh\nexit 9\n").unwrap_or_else(|error| panic!("script: {error}"));
-        fs::set_permissions(&npm, fs::Permissions::from_mode(0o755))
-            .unwrap_or_else(|error| panic!("permissions: {error}"));
+        write_executable(&npm, "#!/bin/sh\nexit 9\n");
         assert!(matches!(
             install_with_npm(root.path(), SPEC, &npm),
             Err(BridgeError::Npm { .. })
