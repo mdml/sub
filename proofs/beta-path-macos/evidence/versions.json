@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-02",
+  "platform": "aarch64-apple-darwin",
+  "os": "macOS 27.0.1",
+  "sub": "aa4fe0a (staging, debug build)",
+  "codex": "0.159.2",
+  "codex_bridge": "@agentclientprotocol/codex-acp 1.6.2",
+  "manager_side": "claude 2.1.285"
+}

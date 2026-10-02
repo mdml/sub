@@ -6,6 +6,10 @@ Date: 2026-09-02. Status: adopted.
 
 The supervision implementation remains adopted, but the shipped targets are now Linux x86_64 and aarch64. macOS is removed from nightly and stable release builds until the beta path has been run with real harnesses on macOS and recorded under `docs/proofs/`. The macOS supervision code and fake-harness CI job remain as preparation; fake-harness CI is not a real-harness demonstration. This updates the release-target statement in the dated decision below; the original decision body is preserved. See [`../release.md`](../release.md) for current distribution.
 
+## Status update — 2026-10-02
+
+The beta path was run with a real Codex child on macOS 27 on Apple silicon and recorded in [`../proofs/beta-path-macos.md`](../proofs/beta-path-macos.md). macOS on Apple silicon (`aarch64-apple-darwin`) returns to the nightly and stable release targets alongside Linux x86_64. Linux aarch64 and Intel macOS (`x86_64-apple-darwin`) stay out until each has its own recorded real-harness proof. This supersedes the shipped-target list in the 2026-09-09 status update.
+
 ## Status update — 2026-09-09
 
 Linux x86_64 is the only shipped target for nightly and stable releases. Linux aarch64 also has no recorded real-harness beta-path proof and is removed from release builds. Linux aarch64 and macOS return when the beta path has been run with real harnesses on each platform and recorded under `docs/proofs/`. The supervision implementation and macOS fake-harness CI remain as preparation. This supersedes the shipped-target list in the 2026-09-08 status update; see [`../release.md`](../release.md) for current distribution.
