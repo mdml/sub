@@ -1,6 +1,7 @@
 //! MCP stdio surface for delegated-task controls and pinned bridge installation.
 
 use std::env;
+use std::ffi::OsString;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -9,28 +10,56 @@ use serde_json::{Value, json};
 use sub_sdk::config::SubConfig;
 use sub_sdk::delegation::{AdapterLaunch, Delegator, Harness, LaunchParams, TaskHandle};
 
-fn default_state_dir(value: Option<&str>, config: &SubConfig) -> Result<PathBuf, String> {
-    if let Some(value) = value {
-        return Ok(PathBuf::from(value));
-    }
-    if let Some(value) = &config.state_dir {
-        return Ok(value.clone());
-    }
-    env::var_os("SUB_STATE_DIR")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| Path::new(&home).join(".sub")))
-        .ok_or_else(|| "HOME is unset; provide state_dir".to_owned())
+/// Environment values that locate `sub.toml` and the default state directory.
+///
+/// The server captures them from the process once; tests construct them
+/// directly so they never read the developer's configuration or `~/.sub`.
+#[derive(Clone, Debug, Default)]
+struct Environment {
+    sub_config: Option<OsString>,
+    xdg_config_home: Option<OsString>,
+    home: Option<OsString>,
+    sub_state_dir: Option<OsString>,
 }
 
-fn config() -> Result<sub_sdk::config::LoadedConfig, String> {
-    match sub_sdk::config::load() {
-        Ok(config) => Ok(config),
-        Err(sub_sdk::config::ConfigError::NoConfigHome) => Ok(sub_sdk::config::LoadedConfig {
-            config: SubConfig::default(),
-            path: PathBuf::new(),
-            exists: false,
-        }),
-        Err(error) => Err(error.to_string()),
+impl Environment {
+    fn from_process() -> Self {
+        Self {
+            sub_config: env::var_os("SUB_CONFIG"),
+            xdg_config_home: env::var_os("XDG_CONFIG_HOME"),
+            home: env::var_os("HOME"),
+            sub_state_dir: env::var_os("SUB_STATE_DIR"),
+        }
+    }
+
+    fn config(&self) -> Result<sub_sdk::config::LoadedConfig, String> {
+        match sub_sdk::config::load_from(
+            self.sub_config.as_deref(),
+            self.xdg_config_home.as_deref(),
+            self.home.as_deref(),
+        ) {
+            Ok(config) => Ok(config),
+            Err(sub_sdk::config::ConfigError::NoConfigHome) => Ok(sub_sdk::config::LoadedConfig {
+                config: SubConfig::default(),
+                path: PathBuf::new(),
+                exists: false,
+            }),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn state_dir(&self, value: Option<&str>, config: &SubConfig) -> Result<PathBuf, String> {
+        if let Some(value) = value {
+            return Ok(PathBuf::from(value));
+        }
+        if let Some(value) = &config.state_dir {
+            return Ok(value.clone());
+        }
+        self.sub_state_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .or_else(|| self.home.as_ref().map(|home| Path::new(home).join(".sub")))
+            .ok_or_else(|| "HOME is unset; provide state_dir".to_owned())
     }
 }
 
@@ -105,13 +134,21 @@ fn adapter(harness: Harness, root: &Path, binary: &Path) -> Result<AdapterLaunch
     }
 }
 
-fn tool_state_dir(args: &Value, config: &SubConfig) -> Result<PathBuf, String> {
-    default_state_dir(args.get("state_dir").and_then(Value::as_str), config)
+fn tool_state_dir(
+    args: &Value,
+    environment: &Environment,
+    config: &SubConfig,
+) -> Result<PathBuf, String> {
+    environment.state_dir(args.get("state_dir").and_then(Value::as_str), config)
 }
 
-fn install_bridge_tool(args: &Value, config: &SubConfig) -> Result<Value, String> {
+fn install_bridge_tool(
+    args: &Value,
+    environment: &Environment,
+    config: &SubConfig,
+) -> Result<Value, String> {
     let harness = string_arg(args, "harness")?;
-    let root = tool_state_dir(args, config)?;
+    let root = tool_state_dir(args, environment, config)?;
     match harness {
         "claude" => sub_adapter_claude::install_bridge(&root)
             .map(|binary| json!({"bridge_binary": binary}))
@@ -132,8 +169,12 @@ fn install_bridge_tool(args: &Value, config: &SubConfig) -> Result<Value, String
     }
 }
 
-fn launch_tool(args: &Value, config: &SubConfig) -> Result<Value, String> {
-    let root = tool_state_dir(args, config)?;
+fn launch_tool(
+    args: &Value,
+    environment: &Environment,
+    config: &SubConfig,
+) -> Result<Value, String> {
+    let root = tool_state_dir(args, environment, config)?;
     let params = launch_params(args, config)?;
     let prepared = adapter(params.harness, &root, &params.harness_binary)?;
     let executable = env::current_exe().map_err(|error| error.to_string())?;
@@ -143,13 +184,13 @@ fn launch_tool(args: &Value, config: &SubConfig) -> Result<Value, String> {
     serde_json::to_value(handle).map_err(|error| error.to_string())
 }
 
-async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
-    let loaded = config()?;
+async fn call_tool(name: &str, args: &Value, environment: &Environment) -> Result<Value, String> {
+    let loaded = environment.config()?;
     match name {
-        "sub_bridge_install" => install_bridge_tool(args, &loaded.config),
-        "sub_launch" => launch_tool(args, &loaded.config),
+        "sub_bridge_install" => install_bridge_tool(args, environment, &loaded.config),
+        "sub_launch" => launch_tool(args, environment, &loaded.config),
         "sub_wait" => {
-            let root = tool_state_dir(args, &loaded.config)?;
+            let root = tool_state_dir(args, environment, &loaded.config)?;
             let seconds = args
                 .get("timeout_seconds")
                 .and_then(Value::as_u64)
@@ -165,7 +206,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_recover" => {
-            let root = tool_state_dir(args, &loaded.config)?;
+            let root = tool_state_dir(args, environment, &loaded.config)?;
             let handle = TaskHandle {
                 id: string_arg(args, "handle")?.to_owned(),
             };
@@ -176,7 +217,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_cancel" => {
-            let root = tool_state_dir(args, &loaded.config)?;
+            let root = tool_state_dir(args, environment, &loaded.config)?;
             let handle = TaskHandle {
                 id: string_arg(args, "handle")?.to_owned(),
             };
@@ -187,7 +228,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_list" => {
-            let root = tool_state_dir(args, &loaded.config)?;
+            let root = tool_state_dir(args, environment, &loaded.config)?;
             let executable = env::current_exe().map_err(|error| error.to_string())?;
             let result = Delegator::new(root, executable)
                 .list()
@@ -195,7 +236,7 @@ async fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             serde_json::to_value(result).map_err(|error| error.to_string())
         }
         "sub_inspect" => {
-            let root = tool_state_dir(args, &loaded.config)?;
+            let root = tool_state_dir(args, environment, &loaded.config)?;
             let handle = TaskHandle {
                 id: string_arg(args, "handle")?.to_owned(),
             };
@@ -221,7 +262,7 @@ fn tools() -> Value {
     ]})
 }
 
-async fn respond(request: Value) -> Option<Value> {
+async fn respond(request: Value, environment: &Environment) -> Option<Value> {
     let id = request.get("id").cloned()?;
     let method = request
         .get("method")
@@ -243,7 +284,7 @@ async fn respond(request: Value) -> Option<Value> {
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            call_tool(name, &args).await.map(|value| json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":false}))
+            call_tool(name, &args, environment).await.map(|value| json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":false}))
         }
         _ => Err(format!("method not found: {method}")),
     };
@@ -256,6 +297,7 @@ async fn respond(request: Value) -> Option<Value> {
 }
 
 async fn serve() -> Result<(), String> {
+    let environment = Environment::from_process();
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -264,7 +306,7 @@ async fn serve() -> Result<(), String> {
             continue;
         }
         let request: Value = serde_json::from_str(&line).map_err(|error| error.to_string())?;
-        if let Some(response) = respond(request).await {
+        if let Some(response) = respond(request, &environment).await {
             serde_json::to_writer(&mut stdout, &response).map_err(|error| error.to_string())?;
             stdout.write_all(b"\n").map_err(|error| error.to_string())?;
             stdout.flush().map_err(|error| error.to_string())?;
@@ -290,12 +332,15 @@ async fn main() {
             .position(|arg| arg == "--state-dir")
             .and_then(|index| args.get(index + 1))
             .map(String::as_str);
-        let loaded = config();
+        let environment = Environment::from_process();
+        let loaded = environment.config();
         match id
             .and_then(|id| number.map(|number| (id, number)))
             .and_then(|(id, number)| {
                 loaded.and_then(|loaded| {
-                    default_state_dir(root, &loaded.config).map(|root| (id, number, root))
+                    environment
+                        .state_dir(root, &loaded.config)
+                        .map(|root| (id, number, root))
                 })
             }) {
             Ok((id, number, root)) => {
@@ -324,8 +369,18 @@ async fn main() {
 mod tests {
     use super::*;
 
+    /// An environment rooted under `root` with no `sub.toml`, so tests never
+    /// read the developer's configuration or default to the real `~/.sub`.
+    fn isolated(root: &Path) -> Environment {
+        Environment {
+            home: Some(root.join("home").into_os_string()),
+            ..Environment::default()
+        }
+    }
+
     async fn assert_tool_error(name: &str, args: Value, expected: &str) {
-        let error = call_tool(name, &args)
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let error = call_tool(name, &args, &isolated(root.path()))
             .await
             .err()
             .unwrap_or_else(|| panic!("{name} error"));
@@ -377,6 +432,7 @@ mod tests {
         );
         let installed = install_bridge_tool(
             &json!({"harness":"cursor-agent","state_dir":"/unused"}),
+            &Environment::default(),
             &config,
         )
         .unwrap_or_else(|error| panic!("cursor bridge: {error}"));
@@ -386,17 +442,28 @@ mod tests {
 
     #[tokio::test]
     async fn protocol_methods_respond() {
-        let initialized = respond(json!({"jsonrpc":"2.0","id":1,"method":"initialize"}))
-            .await
-            .unwrap_or_else(|| panic!("response"));
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let environment = isolated(root.path());
+        let initialized = respond(
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize"}),
+            &environment,
+        )
+        .await
+        .unwrap_or_else(|| panic!("response"));
         assert_eq!(initialized["result"]["serverInfo"]["name"], "sub-mcp");
-        let ping = respond(json!({"jsonrpc":"2.0","id":2,"method":"ping"}))
-            .await
-            .unwrap_or_else(|| panic!("response"));
+        let ping = respond(
+            json!({"jsonrpc":"2.0","id":2,"method":"ping"}),
+            &environment,
+        )
+        .await
+        .unwrap_or_else(|| panic!("response"));
         assert_eq!(ping["result"], json!({}));
-        let listed = respond(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}))
-            .await
-            .unwrap_or_else(|| panic!("response"));
+        let listed = respond(
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}),
+            &environment,
+        )
+        .await
+        .unwrap_or_else(|| panic!("response"));
         assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(7));
         let launch_harnesses =
             &listed["result"]["tools"][0]["inputSchema"]["properties"]["harness"]["enum"];
@@ -410,14 +477,20 @@ mod tests {
             bridge_harnesses,
             &json!(["claude", "codex", "cursor-agent"])
         );
-        let missing = respond(json!({"jsonrpc":"2.0","id":4,"method":"unknown"}))
-            .await
-            .unwrap_or_else(|| panic!("response"));
+        let missing = respond(
+            json!({"jsonrpc":"2.0","id":4,"method":"unknown"}),
+            &environment,
+        )
+        .await
+        .unwrap_or_else(|| panic!("response"));
         assert_eq!(missing["result"]["isError"], true);
         assert!(
-            respond(json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
-                .await
-                .is_none()
+            respond(
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                &environment
+            )
+            .await
+            .is_none()
         );
     }
 
@@ -466,7 +539,56 @@ mod tests {
             let args = json!({"harness":harness,"prompt":"probe","cwd":root_text,"binary":std::env::current_exe().unwrap_or_else(|error| panic!("exe: {error}")),"permission_mode":"agent","state_dir":root_text});
             assert_tool_error("sub_launch", args, "sub bridge install").await;
         }
-        let response = respond(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"sub_wait","arguments":{"handle":"tsk_000000000000000000000000","timeout_seconds":0,"state_dir":root_text}}})).await.unwrap_or_else(|| panic!("response"));
+        let response = respond(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"sub_wait","arguments":{"handle":"tsk_000000000000000000000000","timeout_seconds":0,"state_dir":root_text}}}), &isolated(root.path())).await.unwrap_or_else(|| panic!("response"));
         assert_eq!(response["result"]["isError"], true);
+    }
+
+    #[tokio::test]
+    async fn configuration_and_state_come_from_the_given_environment() {
+        let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let environment = isolated(root.path());
+        let config_dir = root.path().join("home/.config/sub");
+        std::fs::create_dir_all(&config_dir).unwrap_or_else(|error| panic!("mkdir: {error}"));
+        std::fs::write(
+            config_dir.join("sub.toml"),
+            "[harnesses.codex]\nbinary = '/bin/true'\npermission_mode = 'agent'\n",
+        )
+        .unwrap_or_else(|error| panic!("config: {error}"));
+        let cwd = root.path().to_string_lossy();
+        let error = call_tool(
+            "sub_launch",
+            &json!({"harness":"codex","prompt":"probe","cwd":cwd}),
+            &environment,
+        )
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("configured launch without a bridge must fail"));
+        assert!(error.contains("sub bridge install"), "{error}");
+        let config = SubConfig::default();
+        assert_eq!(
+            environment.state_dir(None, &config),
+            Ok(root.path().join("home/.sub"))
+        );
+        let overridden = Environment {
+            sub_state_dir: Some(root.path().join("state").into_os_string()),
+            ..environment
+        };
+        assert_eq!(
+            overridden.state_dir(None, &config),
+            Ok(root.path().join("state"))
+        );
+        let unset = Environment::default();
+        assert!(unset.config().is_ok_and(|loaded| !loaded.exists));
+        assert!(unset.state_dir(None, &config).is_err());
+        let explicit = Environment {
+            sub_config: Some(root.path().join("absent.toml").into_os_string()),
+            xdg_config_home: Some(config_dir.into_os_string()),
+            ..Environment::default()
+        };
+        assert!(
+            explicit
+                .config()
+                .is_ok_and(|loaded| loaded.path == root.path().join("absent.toml"))
+        );
     }
 }

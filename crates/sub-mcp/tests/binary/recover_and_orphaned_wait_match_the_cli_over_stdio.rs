@@ -33,7 +33,7 @@ fn recover_and_orphaned_wait_match_the_cli_over_stdio() {
         .unwrap_or_else(|error| panic!("spawn orphan: {error}"));
     prepare_orphaned_task(root.path(), handle);
     record_harness_child(root.path(), handle, orphan.id());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_sub-mcp"))
+    let mut child = sub_mcp_command(root.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

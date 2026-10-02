@@ -32,7 +32,7 @@ fn spawn_test_mcp(root: &std::path::Path) -> std::process::Child {
         root.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    Command::new(env!("CARGO_BIN_EXE_sub-mcp"))
+    sub_mcp_command(root)
         .env("PATH", path)
         .env("SUB_STATE_DIR", root)
         .stdin(Stdio::piped())

@@ -4,6 +4,13 @@ use std::io::Write;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
+/// Run `sub-mcp` with configuration discovery pinned to an absent file under `root`, so tests never read the developer's real `sub.toml`.
+fn sub_mcp_command(root: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_sub-mcp"));
+    command.env("SUB_CONFIG", root.join("absent-sub.toml"));
+    command
+}
+
 fn existing_binary() -> std::path::PathBuf {
     std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"))
 }

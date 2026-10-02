@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn serves_initialize_and_tool_list_over_stdio() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_sub-mcp"))
+    let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let mut child = sub_mcp_command(root.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

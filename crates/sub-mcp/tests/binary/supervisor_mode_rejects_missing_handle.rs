@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn supervisor_mode_rejects_missing_handle() {
-    let output = Command::new(env!("CARGO_BIN_EXE_sub-mcp"))
+    let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let output = sub_mcp_command(root.path())
         .arg("__supervise")
         .output()
         .unwrap_or_else(|error| panic!("run: {error}"));
