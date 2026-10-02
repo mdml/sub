@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Ship nightly and stable releases for macOS on Apple silicon (`aarch64-apple-darwin`) alongside Linux x86_64, after recording a real-harness beta-path proof on macOS; Linux aarch64 and Intel macOS remain unshipped until each has its own proof.
 - Rename the public harness identifier `cursor` to `cursor-agent` across `sub.toml` (`[harnesses.cursor-agent]`), CLI `--harness` and `sub onboard` values, MCP `harness` enum values, serialized task state, onboarding reports, native-session locators, and the `harness:cursor-agent` issue label; public harness identifiers are now the harness binary names. Existing task state written with `cursor` or `cursor_agent` still loads.
 - Dispose of the orphaned attempt's harness child during recovery: `sub recover` / `sub_recover` now end that child through the same verified-identity path orphaned cancel uses and record `orphaned_child_disposed` on the orphaned attempt before attempt N+1's supervisor starts, so a recovered task has one live child.
 - Make cancel terminal for an orphaned attempt: `sub cancel` / `sub_cancel` on a task whose supervisor died now end the recorded harness child when its PID and start identity verify, publish a cancelled result, record `attempt_orphaned`, `orphaned_child_disposed`, `attempt_cancelled`, and `attempt_finished`, and reject later recovery; supervisors record the bridge child's identity in attempt state at spawn.

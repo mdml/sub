@@ -6,7 +6,7 @@ Give the coding agent you already use subagents from any supported coding harnes
 
 ## Status
 
-The four beta feature proofs pass: Delegate from a real Claude Code manager to a real Codex child, Observe through independent CLI and MCP processes, Recover through replacement-manager wait and replacement-supervisor session resume, and Control through cross-process cancellation. The composed delegate → observe → recover → cancel path passes on one real Codex task; a non-gating Cursor-child variant passes through replaying `session/load`. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), [`docs/proofs/control.md`](docs/proofs/control.md), [`docs/proofs/beta-path.md`](docs/proofs/beta-path.md), and [`docs/proofs/beta-path-cursor.md`](docs/proofs/beta-path-cursor.md).
+The four beta feature proofs pass: Delegate from a real Claude Code manager to a real Codex child, Observe through independent CLI and MCP processes, Recover through replacement-manager wait and replacement-supervisor session resume, and Control through cross-process cancellation. The composed delegate → observe → recover → cancel path passes on one real Codex task on Linux x86_64 and again on macOS Apple silicon; a non-gating Cursor-child variant passes through replaying `session/load`. See [`docs/proofs/delegate.md`](docs/proofs/delegate.md), [`docs/proofs/observe.md`](docs/proofs/observe.md), [`docs/proofs/recover.md`](docs/proofs/recover.md), [`docs/proofs/control.md`](docs/proofs/control.md), [`docs/proofs/beta-path.md`](docs/proofs/beta-path.md), [`docs/proofs/beta-path-macos.md`](docs/proofs/beta-path-macos.md), and [`docs/proofs/beta-path-cursor.md`](docs/proofs/beta-path-cursor.md).
 
 ## Configure and onboard
 
@@ -69,7 +69,7 @@ If `sub` itself misbehaves, `sub report tsk_REPLACE_WITH_HANDLE` prints a scrubb
 
 ## Install
 
-Releases ship only for Linux x86_64. Stable releases are distributed through Homebrew, mise, and `cargo binstall`; nightly archives are published as GitHub prereleases. See [`docs/release.md`](docs/release.md) for channels and installation details. Linux aarch64 and macOS return to the shipped target list when the beta path has been run with real harnesses on each platform and recorded under `docs/proofs/`. The macOS supervision code and fake-harness CI remain as preparation.
+Releases ship for Linux x86_64 and macOS on Apple silicon. Stable releases are distributed through Homebrew, mise, and `cargo binstall`; nightly archives are published as GitHub prereleases. See [`docs/release.md`](docs/release.md) for channels and installation details. Linux aarch64 and Intel macOS return to the shipped target list when the beta path has been run with real harnesses on each platform and recorded under `docs/proofs/`.
 
 ## Build
 

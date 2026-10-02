@@ -1,0 +1,89 @@
+{
+  "cancel": {
+    "handle": {
+      "id": "$HANDLE"
+    },
+    "attempt": 2,
+    "delivery": "delivered"
+  },
+  "wait": {
+    "state": "complete",
+    "result": {
+      "status": "cancelled",
+      "summary": "The first file is created. I’ll resume waiting for the existing `sleep 300`, then create the second file.",
+      "changed_files": [],
+      "artifacts": [
+        {
+          "kind": "event_log",
+          "location": "$STATE_DIR/tasks/$HANDLE/attempts/2/events.jsonl"
+        },
+        {
+          "kind": "supervisor_log",
+          "location": "$STATE_DIR/tasks/$HANDLE/attempts/2/supervisor.log"
+        },
+        {
+          "kind": "native_session",
+          "location": "$CODEX_HOME/sessions/YYYY/MM/DD/rollout-$SESSION_ID.jsonl"
+        }
+      ],
+      "harness_session_id": "$SESSION_ID"
+    }
+  },
+  "inspect": {
+    "task_status": "cancelled",
+    "usage_support": {
+      "cost": false,
+      "tokens": true
+    },
+    "attempts": [
+      {
+        "number": 1,
+        "status": "orphaned",
+        "harness_session_id": "$SESSION_ID"
+      },
+      {
+        "number": 2,
+        "status": "cancelled",
+        "harness_session_id": "$SESSION_ID",
+        "usage": {
+          "tokens": {
+            "total_tokens": 19010
+          }
+        }
+      }
+    ],
+    "lifecycle_events": [
+      {
+        "attempt": 1,
+        "kind": "attempt_started"
+      },
+      {
+        "attempt": 1,
+        "kind": "attempt_orphaned"
+      },
+      {
+        "attempt": 1,
+        "kind": "orphaned_child_disposed",
+        "disposition": "already_gone"
+      },
+      {
+        "attempt": 2,
+        "kind": "attempt_started"
+      },
+      {
+        "attempt": 2,
+        "kind": "attempt_resumed"
+      },
+      {
+        "attempt": 2,
+        "kind": "attempt_cancelled",
+        "harness_honored": true
+      },
+      {
+        "attempt": 2,
+        "kind": "attempt_finished",
+        "status": "cancelled"
+      }
+    ]
+  }
+}
