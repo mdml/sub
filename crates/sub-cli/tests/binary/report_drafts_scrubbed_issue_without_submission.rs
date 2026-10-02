@@ -20,7 +20,7 @@ fn report_drafts_scrubbed_issue_without_submission() {
     )
     .unwrap_or_else(|error| panic!("write task: {error}"));
 
-    let output = Command::new(env!("CARGO_BIN_EXE_sub"))
+    let output = sub_command(env!("CARGO_BIN_EXE_sub"), root.path())
         .args(["report", handle, "--state-dir"])
         .arg(root.path())
         .env("HOME", root.path())

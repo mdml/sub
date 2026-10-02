@@ -8,7 +8,7 @@ fn run_json(
     handle: &str,
     root: &std::path::Path,
 ) -> serde_json::Value {
-    let output = Command::new(binary)
+    let output = sub_command(binary, root)
         .args([command, handle, "--state-dir"])
         .arg(root)
         .output()
@@ -56,7 +56,7 @@ fn cancel_ends_an_orphaned_task_and_its_child() {
             .unwrap_or_else(|error| panic!("child wait: {error}"))
             .success()
     );
-    let complete = Command::new(binary)
+    let complete = sub_command(binary, root.path())
         .args(["wait", handle, "--timeout-seconds", "0", "--state-dir"])
         .arg(root.path())
         .output()
@@ -76,7 +76,7 @@ fn cancel_ends_an_orphaned_task_and_its_child() {
         ]
     );
     assert_eq!(inspect["events"][1]["disposition"], "terminated");
-    let recover = Command::new(binary)
+    let recover = sub_command(binary, root.path())
         .args(["recover", handle, "--state-dir"])
         .arg(root.path())
         .output()
