@@ -4,7 +4,6 @@ use super::*;
 #[test]
 fn configured_launch_values_flow_through_mcp() {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
 
     let root = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let state = root.path().join("state");
@@ -20,10 +19,10 @@ fn configured_launch_values_flow_through_mcp() {
     )
     .unwrap_or_else(|error| panic!("config: {error}"));
     let npm = root.path().join("npm");
-    fs::write(&npm, "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nprintf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/codex-acp\"\nchmod +x \"$prefix/node_modules/.bin/codex-acp\"\n")
-        .unwrap_or_else(|error| panic!("npm: {error}"));
-    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755))
-        .unwrap_or_else(|error| panic!("permissions: {error}"));
+    write_executable(
+        &npm,
+        "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nprintf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/codex-acp\"\nchmod +x \"$prefix/node_modules/.bin/codex-acp\"\n",
+    );
     let path = format!(
         "{}:{}",
         root.path().display(),

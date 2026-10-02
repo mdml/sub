@@ -11,6 +11,22 @@ fn sub_mcp_command(root: &std::path::Path) -> Command {
     command
 }
 
+/// Write an executable fixture from a child shell, so this multi-threaded test process never holds a write descriptor that a child forked by a sibling test could inherit; Linux fails `exec` of a file open for writing with `ETXTBSY`.
+#[cfg(unix)]
+fn write_executable(path: &std::path::Path, script: &str) {
+    let status = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "printf '%s' \"$2\" > \"$1\" && chmod 755 \"$1\"",
+            "write-executable",
+        ])
+        .arg(path)
+        .arg(script)
+        .status()
+        .unwrap_or_else(|error| panic!("write executable: {error}"));
+    assert!(status.success(), "write executable: {status}");
+}
+
 fn existing_binary() -> std::path::PathBuf {
     std::env::current_exe().unwrap_or_else(|error| panic!("current executable: {error}"))
 }

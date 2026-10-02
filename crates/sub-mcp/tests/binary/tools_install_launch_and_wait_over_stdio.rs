@@ -20,13 +20,11 @@ fn tools_install_launch_and_wait_over_stdio() {
 }
 
 fn spawn_test_mcp(root: &std::path::Path) -> std::process::Child {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     let npm = root.join("npm");
-    fs::write(&npm, "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nfor name in codex-acp claude-agent-acp; do printf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/$name\"; chmod +x \"$prefix/node_modules/.bin/$name\"; done\n")
-        .unwrap_or_else(|error| panic!("npm: {error}"));
-    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755))
-        .unwrap_or_else(|error| panic!("permissions: {error}"));
+    write_executable(
+        &npm,
+        "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nshift\nprefix=$1\nmkdir -p \"$prefix/node_modules/.bin\"\nfor name in codex-acp claude-agent-acp; do printf '#!/bin/sh\\nexit 1\\n' > \"$prefix/node_modules/.bin/$name\"; chmod +x \"$prefix/node_modules/.bin/$name\"; done\n",
+    );
     let path = format!(
         "{}:{}",
         root.display(),
