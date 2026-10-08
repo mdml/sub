@@ -21,7 +21,7 @@ homepage = "https://github.com/mdml/sub"
 [workspace.dependencies]
 # Exact pins. Rationale: docs/decisions/2026-08-27-async-runtime.md and
 # docs/decisions/2026-08-27-acp-sdk.md.
-tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
+tokio = { version = "=1.53.2", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
 agent-client-protocol = "=2.0.0"
 async-process = "=2.5.0"
 futures = "=0.3.34"
